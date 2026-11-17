@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "begleiter",
+  "version": "${version}",
+  "name": "Begleiter",
+  "description": "A craftable companion that plays Minecraft like a second player: follows orders, gathers, mines, crafts, builds farms and schematics, remembers the world and can progress on its own.",
+  "authors": ["Leak1337"],
+  "license": ["MIT", "LGPL-3.0-or-later"],
+  "icon": "assets/begleiter/icon.png",
+  "contact": {
+    "homepage": "https://github.com/Leak1337/begleiter",
+    "sources": "https://github.com/Leak1337/begleiter",
+    "issues": "https://github.com/Leak1337/begleiter/issues"
+  },
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.begleiter.CompanionMod"],
+    "client": ["dev.begleiter.CompanionClient"]
+  },
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "${minecraft_version}",
+    "java": ">=${java_version}",
+    "fabric-api": ">=${fabric_api_version}"
+  },
+  "suggests": {
+    "modmenu": "*"
+  }
+}

@@ -1,0 +1,144 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      minecraft_version:
+        description: 'Minecraft-Ziel (leer = geprüfte Basis aus gradle.properties)'
+        type: string
+        required: false
+      fabric_api_version:
+        description: 'Passende Fabric API (bei anderer Minecraft-Version erforderlich)'
+        type: string
+        required: false
+      loader_version:
+        description: 'Fabric Loader (leer = Basis)'
+        type: string
+        required: false
+      loom_version:
+        description: 'Loom (leer = feste Basisversion)'
+        type: string
+        required: false
+      java_version:
+        description: 'Java-Hauptversion (leer = 25)'
+        type: string
+        required: false
+
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  TARGET_MC: ${{ inputs.minecraft_version }}
+  TARGET_FABRIC_API: ${{ inputs.fabric_api_version }}
+  TARGET_LOADER: ${{ inputs.loader_version }}
+  TARGET_LOOM: ${{ inputs.loom_version }}
+  TARGET_JAVA: ${{ inputs.java_version }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify Gradle wrapper JAR against the official checksum
+        run: |
+          version=$(sed -n 's#^distributionUrl=.*gradle-\([0-9.]*\)-.*\.zip$#\1#p' gradle/wrapper/gradle-wrapper.properties)
+          test -n "$version"
+          expected=$(curl -fsSL "https://services.gradle.org/distributions/gradle-${version}-wrapper.jar.sha256")
+          actual=$(sha256sum gradle/wrapper/gradle-wrapper.jar | cut -d' ' -f1)
+          echo "Gradle ${version}: expected ${expected}, actual ${actual}"
+          test "$expected" = "$actual"
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version || '25' }}
+      - name: Assemble, unit tests and packaged compatibility metadata
+        run: bash tools/gradle-compat.sh assemble test compileGametestJava verifyPackagedMod
+      - name: Upload mod
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: begleiter
+          path: build/libs/*.jar
+          if-no-files-found: error
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-test-results
+          path: |
+            build/test-results/
+            build/reports/tests/
+          if-no-files-found: ignore
+  gametest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version || '25' }}
+      - name: Run server-side Fabric GameTests
+        run: bash tools/gradle-compat.sh runGameTest
+      - name: Compare situational decisions with classic ranking (intelligence off)
+        run: bash tools/gradle-compat.sh runGameTest -PtestFilter="begleiter-gametest:situational_game_tests*" -PintelligenceEnabled=false
+      - name: Verify learned routes with classic ranking (intelligence off)
+        run: bash tools/gradle-compat.sh runGameTest -PtestFilter="begleiter-gametest:long_term_game_tests*" -PintelligenceEnabled=false
+      - name: Verify source-specific feedback with classic ranking (intelligence off)
+        run: bash tools/gradle-compat.sh runGameTest -PtestFilter="begleiter-gametest:source_game_tests*" -PintelligenceEnabled=false
+      - name: Verify outbound and return routes with classic ranking (intelligence off)
+        run: bash tools/gradle-compat.sh runGameTest -PtestFilter="begleiter-gametest:route_safety_tests*" -PintelligenceEnabled=false
+      - name: Verify plan prerequisites with classic ranking (intelligence off)
+        run: bash tools/gradle-compat.sh runGameTest -PtestFilter="begleiter-gametest:prerequisite_game_tests*" -PintelligenceEnabled=false
+      - name: Upload GameTest logs and crash reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gametest-results
+          path: |
+            build/run/gameTest/logs/
+            build/run/gameTest/crash-reports/
+            build/run/gameTest/reports/
+          if-no-files-found: ignore
+
+  client:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      LIBGL_ALWAYS_SOFTWARE: 'true'
+      ALSOFT_DRIVERS: 'null'
+      BEGLEITER_EXTERNAL_XVFB: 'true'
+      SDL_VIDEO_DRIVER: x11
+      MESA_GL_VERSION_OVERRIDE: '4.6'
+      MESA_GLSL_VERSION_OVERRIDE: '460'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java_version || '25' }}
+      - name: Install software graphics drivers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dri libglx-mesa0 mesa-utils libvulkan1 mesa-vulkan-drivers
+      - name: Singleplayer UI tests
+        timeout-minutes: 5
+        run: |
+          xvfb-run -a -s "-screen 0 1280x720x24 +extension GLX +render -noreset" sh -c 'glxinfo -B && bash tools/gradle-compat.sh runClientGameTest'
+      - name: Upload UI screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: control-center-ui
+          path: |
+            build/run/clientGameTest/screenshots/
+            build/run/clientGameTest/logs/
+            build/run/clientGameTest/crash-reports/
+          if-no-files-found: ignore

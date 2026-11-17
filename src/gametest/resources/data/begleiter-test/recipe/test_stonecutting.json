@@ -1,0 +1,5 @@
+{
+  "type": "minecraft:stonecutting",
+  "ingredient": "minecraft:oak_planks",
+  "result": {"id": "begleiter-test:coal", "count": 2}
+}

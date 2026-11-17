@@ -1,0 +1,17 @@
+[
+  {
+    "file": "Villager-Breeding-Farm.schem",
+    "sha256": "DCEDBB1ACE5BB8BB230ADFC310A7F4F1A84412B97CF07E823F9208FD3F59B2D7",
+    "reason": "Vier vorgesehene Bett-Dorfbewohner sind nach 60 Ticks nicht vorhanden."
+  },
+  {
+    "file": "Villagers-Farm.schem",
+    "sha256": "A7718FED7D9DBCEFFC072F154AB3B9E078B4BFBBB5CA1303DFD350CB12485B93",
+    "reason": "Vier Bett-Dorfbewohner fehlen nach 60 Ticks; eine Schiene verbindet sich in die falsche Richtung."
+  },
+  {
+    "file": "tnt-oak-tree-farm-bcc3f9f8.litematic",
+    "sha256": "9390B9FADAB2B875B63C7F4101282DD4F9C5F4C21368550673DD7996C493259E",
+    "reason": "Eine von fünf gespeicherten Sammelloren fehlt reproduzierbar nach 60 Ticks."
+  }
+]

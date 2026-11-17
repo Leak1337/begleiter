@@ -1,0 +1,514 @@
+[
+  {
+    "id": "stone",
+    "name_de": "Stein"
+  },
+  {
+    "id": "cobblestone",
+    "name_de": "Bruchstein"
+  },
+  {
+    "id": "smooth_stone",
+    "name_de": "Glatter Stein"
+  },
+  {
+    "id": "deepslate",
+    "name_de": "Tiefenschiefer"
+  },
+  {
+    "id": "cobbled_deepslate",
+    "name_de": "Bruchtiefenschiefer"
+  },
+  {
+    "id": "polished_deepslate",
+    "name_de": "Polierter Tiefenschiefer"
+  },
+  {
+    "id": "tuff",
+    "name_de": "Tuffstein"
+  },
+  {
+    "id": "calcite",
+    "name_de": "Kalzit"
+  },
+  {
+    "id": "granite",
+    "name_de": "Granit"
+  },
+  {
+    "id": "polished_granite",
+    "name_de": "Polierter Granit"
+  },
+  {
+    "id": "diorite",
+    "name_de": "Diorit"
+  },
+  {
+    "id": "polished_diorite",
+    "name_de": "Polierter Diorit"
+  },
+  {
+    "id": "andesite",
+    "name_de": "Andesit"
+  },
+  {
+    "id": "polished_andesite",
+    "name_de": "Polierter Andesit"
+  },
+  {
+    "id": "dirt",
+    "name_de": "Erde"
+  },
+  {
+    "id": "grass_block",
+    "name_de": "Grasblock"
+  },
+  {
+    "id": "coarse_dirt",
+    "name_de": "Grobe Erde"
+  },
+  {
+    "id": "rooted_dirt",
+    "name_de": "Wurzelerde"
+  },
+  {
+    "id": "mud",
+    "name_de": "Schlamm"
+  },
+  {
+    "id": "clay",
+    "name_de": "Ton"
+  },
+  {
+    "id": "sand",
+    "name_de": "Sand"
+  },
+  {
+    "id": "red_sand",
+    "name_de": "Roter Sand"
+  },
+  {
+    "id": "gravel",
+    "name_de": "Kies"
+  },
+  {
+    "id": "sandstone",
+    "name_de": "Sandstein"
+  },
+  {
+    "id": "red_sandstone",
+    "name_de": "Roter Sandstein"
+  },
+  {
+    "id": "netherrack",
+    "name_de": "Netherrack"
+  },
+  {
+    "id": "basalt",
+    "name_de": "Basalt"
+  },
+  {
+    "id": "blackstone",
+    "name_de": "Schwarzstein"
+  },
+  {
+    "id": "end_stone",
+    "name_de": "Endstein"
+  },
+  {
+    "id": "obsidian",
+    "name_de": "Obsidian"
+  },
+  {
+    "id": "crying_obsidian",
+    "name_de": "Weinender Obsidian"
+  },
+  {
+    "id": "glass",
+    "name_de": "Glas"
+  },
+  {
+    "id": "oak_log",
+    "name_de": "Eichenstamm"
+  },
+  {
+    "id": "spruce_log",
+    "name_de": "Fichtenstamm"
+  },
+  {
+    "id": "birch_log",
+    "name_de": "Birkenstamm"
+  },
+  {
+    "id": "jungle_log",
+    "name_de": "Tropenbaumstamm"
+  },
+  {
+    "id": "acacia_log",
+    "name_de": "Akazienstamm"
+  },
+  {
+    "id": "dark_oak_log",
+    "name_de": "Schwarzeichenstamm"
+  },
+  {
+    "id": "mangrove_log",
+    "name_de": "Mangrovenstamm"
+  },
+  {
+    "id": "cherry_log",
+    "name_de": "Kirschstamm"
+  },
+  {
+    "id": "pale_oak_log",
+    "name_de": "Blasseichenstamm"
+  },
+  {
+    "id": "bamboo_block",
+    "name_de": "Bambusblock"
+  },
+  {
+    "id": "crimson_stem",
+    "name_de": "Karmesinstiel"
+  },
+  {
+    "id": "warped_stem",
+    "name_de": "Wirrstiel"
+  },
+  {
+    "id": "oak_planks",
+    "name_de": "Eichenholzbretter"
+  },
+  {
+    "id": "spruce_planks",
+    "name_de": "Fichtenholzbretter"
+  },
+  {
+    "id": "birch_planks",
+    "name_de": "Birkenholzbretter"
+  },
+  {
+    "id": "jungle_planks",
+    "name_de": "Tropenholzbretter"
+  },
+  {
+    "id": "acacia_planks",
+    "name_de": "Akazienholzbretter"
+  },
+  {
+    "id": "dark_oak_planks",
+    "name_de": "Schwarzeichenholzbretter"
+  },
+  {
+    "id": "mangrove_planks",
+    "name_de": "Mangrovenholzbretter"
+  },
+  {
+    "id": "cherry_planks",
+    "name_de": "Kirschholzbretter"
+  },
+  {
+    "id": "pale_oak_planks",
+    "name_de": "Blasseichenholzbretter"
+  },
+  {
+    "id": "bamboo_planks",
+    "name_de": "Bambusbretter"
+  },
+  {
+    "id": "crimson_planks",
+    "name_de": "Karmesinbretter"
+  },
+  {
+    "id": "warped_planks",
+    "name_de": "Wirrbretter"
+  },
+  {
+    "id": "iron_ingot",
+    "name_de": "Eisenbarren"
+  },
+  {
+    "id": "gold_ingot",
+    "name_de": "Goldbarren"
+  },
+  {
+    "id": "copper_ingot",
+    "name_de": "Kupferbarren"
+  },
+  {
+    "id": "raw_iron",
+    "name_de": "Roheisen"
+  },
+  {
+    "id": "raw_gold",
+    "name_de": "Rohgold"
+  },
+  {
+    "id": "raw_copper",
+    "name_de": "Rohkupfer"
+  },
+  {
+    "id": "coal",
+    "name_de": "Kohle"
+  },
+  {
+    "id": "charcoal",
+    "name_de": "Holzkohle"
+  },
+  {
+    "id": "diamond",
+    "name_de": "Diamant"
+  },
+  {
+    "id": "emerald",
+    "name_de": "Smaragd"
+  },
+  {
+    "id": "lapis_lazuli",
+    "name_de": "Lapislazuli"
+  },
+  {
+    "id": "redstone",
+    "name_de": "Redstone-Staub"
+  },
+  {
+    "id": "quartz",
+    "name_de": "Netherquarz"
+  },
+  {
+    "id": "amethyst_shard",
+    "name_de": "Amethystscherbe"
+  },
+  {
+    "id": "netherite_scrap",
+    "name_de": "Netheritplatten"
+  },
+  {
+    "id": "netherite_ingot",
+    "name_de": "Netheritbarren"
+  },
+  {
+    "id": "redstone_torch",
+    "name_de": "Redstone-Fackel"
+  },
+  {
+    "id": "redstone_block",
+    "name_de": "Redstone-Block"
+  },
+  {
+    "id": "repeater",
+    "name_de": "Redstone-Verstärker"
+  },
+  {
+    "id": "comparator",
+    "name_de": "Redstone-Komparator"
+  },
+  {
+    "id": "observer",
+    "name_de": "Beobachter"
+  },
+  {
+    "id": "piston",
+    "name_de": "Kolben"
+  },
+  {
+    "id": "sticky_piston",
+    "name_de": "Klebriger Kolben"
+  },
+  {
+    "id": "hopper",
+    "name_de": "Trichter"
+  },
+  {
+    "id": "dropper",
+    "name_de": "Spender"
+  },
+  {
+    "id": "dispenser",
+    "name_de": "Werfer"
+  },
+  {
+    "id": "lever",
+    "name_de": "Hebel"
+  },
+  {
+    "id": "torch",
+    "name_de": "Fackel"
+  },
+  {
+    "id": "rail",
+    "name_de": "Schiene"
+  },
+  {
+    "id": "powered_rail",
+    "name_de": "Antriebsschiene"
+  },
+  {
+    "id": "target",
+    "name_de": "Zielblock"
+  },
+  {
+    "id": "crafter",
+    "name_de": "Werker"
+  },
+  {
+    "id": "wheat",
+    "name_de": "Weizenpflanze"
+  },
+  {
+    "id": "wheat_seeds",
+    "name_de": "Weizenkörner"
+  },
+  {
+    "id": "beetroot",
+    "name_de": "Rote Bete"
+  },
+  {
+    "id": "beetroot_seeds",
+    "name_de": "Rote-Bete-Samen"
+  },
+  {
+    "id": "carrot",
+    "name_de": "Karotte"
+  },
+  {
+    "id": "potato",
+    "name_de": "Kartoffel"
+  },
+  {
+    "id": "sugar_cane",
+    "name_de": "Zuckerrohr"
+  },
+  {
+    "id": "bamboo",
+    "name_de": "Bambus"
+  },
+  {
+    "id": "cactus",
+    "name_de": "Kaktus"
+  },
+  {
+    "id": "kelp",
+    "name_de": "Seetang"
+  },
+  {
+    "id": "dried_kelp",
+    "name_de": "Getrockneter Seetang"
+  },
+  {
+    "id": "bone_meal",
+    "name_de": "Knochenmehl"
+  },
+  {
+    "id": "bone",
+    "name_de": "Knochen"
+  },
+  {
+    "id": "gunpowder",
+    "name_de": "Schwarzpulver"
+  },
+  {
+    "id": "string",
+    "name_de": "Faden"
+  },
+  {
+    "id": "rotten_flesh",
+    "name_de": "Verrottetes Fleisch"
+  },
+  {
+    "id": "arrow",
+    "name_de": "Pfeil"
+  },
+  {
+    "id": "flint",
+    "name_de": "Feuerstein"
+  },
+  {
+    "id": "leather",
+    "name_de": "Leder"
+  },
+  {
+    "id": "paper",
+    "name_de": "Papier"
+  },
+  {
+    "id": "book",
+    "name_de": "Buch"
+  },
+  {
+    "id": "slime_ball",
+    "name_de": "Schleimball"
+  },
+  {
+    "id": "honeycomb",
+    "name_de": "Honigwabe"
+  },
+  {
+    "id": "glowstone_dust",
+    "name_de": "Leuchtsteinstaub"
+  },
+  {
+    "id": "white_wool",
+    "name_de": "Weiße Wolle"
+  },
+  {
+    "id": "orange_wool",
+    "name_de": "Orange Wolle"
+  },
+  {
+    "id": "magenta_wool",
+    "name_de": "Magenta Wolle"
+  },
+  {
+    "id": "light_blue_wool",
+    "name_de": "Hellblaue Wolle"
+  },
+  {
+    "id": "yellow_wool",
+    "name_de": "Gelbe Wolle"
+  },
+  {
+    "id": "lime_wool",
+    "name_de": "Hellgrüne Wolle"
+  },
+  {
+    "id": "pink_wool",
+    "name_de": "Rosa Wolle"
+  },
+  {
+    "id": "gray_wool",
+    "name_de": "Graue Wolle"
+  },
+  {
+    "id": "light_gray_wool",
+    "name_de": "Hellgraue Wolle"
+  },
+  {
+    "id": "cyan_wool",
+    "name_de": "Türkise Wolle"
+  },
+  {
+    "id": "purple_wool",
+    "name_de": "Violette Wolle"
+  },
+  {
+    "id": "blue_wool",
+    "name_de": "Blaue Wolle"
+  },
+  {
+    "id": "brown_wool",
+    "name_de": "Braune Wolle"
+  },
+  {
+    "id": "green_wool",
+    "name_de": "Grüne Wolle"
+  },
+  {
+    "id": "red_wool",
+    "name_de": "Rote Wolle"
+  },
+  {
+    "id": "black_wool",
+    "name_de": "Schwarze Wolle"
+  }
+]

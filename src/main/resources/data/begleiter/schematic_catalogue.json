@@ -1,0 +1,38 @@
+[
+  {
+    "id": "request_storage_128",
+    "source": "Begleiter custom design; BU003 unloader by misterkartoffel and sergyd",
+    "file": "Zentrallager 128 mit Sortierung und Itemabruf.nbt",
+    "purpose": "Sortiert 128 feste Materialtypen und liefert sie per Abruf an eine zentrale Ausgabe.",
+    "operation": "Eingang oben befüllen. Materialknopf drücken. Ausgabehebel AUS: lose Items; EIN: ganze Boxen.",
+    "requirement": "Creative ist vorgefüllt. Survival: Filter und Leerboxkreislauf füllen. Restekiste leeren, wenn die Eingangslampe leuchtet.",
+    "checked_by_user": false,
+    "sha256": "8D75213E2BB87DEFB5C96CE4FD04362320193E2F7D77410F7EDC82ED643126C5",
+    "legacy_files": {},
+    "audit": "end-to-end-sorting-retrieval-unloading-and-empty-return-tested"
+  },
+  {
+    "id": "survival_storage_12",
+    "source": "Begleiter custom survival chest room",
+    "file": "Kompakter Survival-Kistenraum mit Autosortierung (12 Materialien).nbt",
+    "purpose": "Kleiner Kistenraum mit einer Einwurfkiste, zwölf automatischen Sortierfächern und sicherer Restekiste.",
+    "operation": "Items in die Einwurfkiste an der Rückwand legen. Direkt aus den beschrifteten Doppelkisten entnehmen.",
+    "requirement": "Survival: je Fach 2 Zielitems + 44 benannte Füllsteine. Filter über Dachluke erreichen; Transporttrichter kurz abnehmen und ersetzen.",
+    "checked_by_user": false,
+    "sha256": "469936BF8336E2628760C7707575B2B3EC38E5C304FECD5CF4A3BA22D162311C",
+    "legacy_files": {},
+    "audit": "automatic-sorting-overflow-and-full-storage-operation-checked"
+  },
+  {
+    "id": "survival_storage_24",
+    "source": "Begleiter custom survival chest room",
+    "file": "Kompakter Survival-Kistenraum mit Autosortierung (24 Materialien, 2 Doppelkisten je Fach).nbt",
+    "purpose": "Kleiner Kistenraum mit einer Einwurfkiste, 24 automatischen Sortierfächern mit je zwei Doppelkisten und sicherer Restekiste.",
+    "operation": "Items in die Einwurfkiste an der Rückwand legen. Direkt aus den beschrifteten Doppelkisten entnehmen.",
+    "requirement": "Survival: je Fach 2 Zielitems + 44 benannte Füllsteine. Filter über Dachluke erreichen; Transporttrichter kurz abnehmen und ersetzen.",
+    "checked_by_user": false,
+    "sha256": "B5F527FC7758D5B89D2FE043FFEA5427C3AC2D2BDA5DFDAE5617C9993C9991B4",
+    "legacy_files": {},
+    "audit": "automatic-sorting-overflow-and-full-storage-operation-checked"
+  }
+]

@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": ["IRI", "GDG", "III"],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "R": "minecraft:redstone",
+    "G": "minecraft:gold_ingot",
+    "D": "minecraft:diamond"
+  },
+  "result": { "id": "begleiter:companion_core", "count": 1 }
+}

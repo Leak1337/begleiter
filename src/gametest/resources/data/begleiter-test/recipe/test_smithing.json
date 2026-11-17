@@ -1,0 +1,7 @@
+{
+  "type": "minecraft:smithing_transform",
+  "template": "minecraft:paper",
+  "base": "begleiter-test:stick",
+  "addition": "minecraft:copper_ingot",
+  "result": {"id": "begleiter-test:raw_iron"}
+}

@@ -1,0 +1,303 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+    id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+def targetJava = Integer.parseInt(project.java_version)
+['minecraft_version', 'loader_version', 'fabric_api_version', 'loom_version'].each { key ->
+    if (!(project.property(key) ==~ /[0-9A-Za-z][0-9A-Za-z.+_-]{0,95}/))
+        throw new GradleException("Ungültiger Versionswert für ${key}")
+}
+
+base { archivesName = "${project.archives_base_name}-mc${project.minecraft_version}" }
+
+repositories { mavenCentral() }
+
+dependencies {
+    testImplementation platform("org.junit:junit-bom:5.14.0")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    // 26.x ist unobfuskiert: keine Mappings, kein "mod"-Prefix mehr
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+}
+
+// Client-Code liegt in src/client/java: der gemeinsame Code (src/main) kann net.minecraft.client dann gar nicht erst
+// kompilieren, ein Dedicated Server lädt so nie eine Client-Klasse. Muss vor configureTests stehen.
+loom {
+    splitEnvironmentSourceSets()
+    mods {
+        begleiter {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+}
+
+// GameTests: eigener Source-Set src/gametest, starten mit .\gradlew runGameTest
+fabricApi {
+    configureTests {
+        createSourceSet = true
+        modId = "begleiter-gametest"
+        enableGameTests = true
+        enableClientGameTests = true
+        eula = false
+    }
+}
+
+loom {
+    // Fester Name im Test-Client: sonst gibt es bei jedem Start einen neuen Spieler (neue UUID) und der Begleiter
+    // erkennt seinen Besitzer nicht mehr
+    runs {
+        client {
+            programArgs "--username", "Spieler"
+        }
+        schematicShowcaseExport {
+            inherit server
+            name "Export flat schematic showcase"
+            runDir "build/schematic-showcase-export"
+            vmArg "-Dbegleiter.showcaseExport=true"
+            if (providers.gradleProperty("showcaseOnly").isPresent())
+                vmArg "-Dbegleiter.showcaseOnly=${providers.gradleProperty('showcaseOnly').get()}"
+            if (providers.gradleProperty("showcaseFocus").isPresent())
+                vmArg "-Dbegleiter.showcaseFocus=${providers.gradleProperty('showcaseFocus').get()}"
+            vmArg "-Xmx4G"
+            programArgs "nogui"
+        }
+        schematicShowcase {
+            inherit client
+            name "Schematic showcase"
+            programArgs "--quickPlaySingleplayer", providers.gradleProperty("showcaseWorld").getOrElse("Schematic-Schauwelt")
+        }
+        // .\gradlew runTestmap: startet direkt in die Welt "Testmap" und baut dort beim ersten Betreten das
+        // Testgelände (dev.begleiter.TestMap). -PtestmapRun=alle (oder name,name) startet gleich die Szenarien;
+        // Ergebnisse: run/saves/Testmap/begleiter-testmap-ergebnisse.txt
+        testmap {
+            inherit client
+            name "Testmap"
+            programArgs "--quickPlaySingleplayer", "Testmap"
+            vmArg "-Dbegleiter.testmap=true"
+            if (providers.gradleProperty("testmapView").isPresent())
+                vmArg "-Dbegleiter.testmap.view=${providers.gradleProperty("testmapView").get()}"
+            if (providers.gradleProperty("testmapRun").isPresent())
+                vmArg "-Dbegleiter.testmap.run=${providers.gradleProperty("testmapRun").get()}"
+        }
+    }
+}
+
+processResources {
+    def metadata = [version: project.version.toString(), minecraft_version: project.minecraft_version,
+                    loader_version: project.loader_version, java_version: project.java_version,
+                    fabric_api_version: project.fabric_api_version]
+    inputs.properties(metadata)
+    filesMatching("fabric.mod.json") { expand(metadata) }
+    // Deutsche Minecraft-Varianten verwenden denselben Katalog; keine separat gepflegten Kopien.
+    ['de_at', 'de_ch'].each { locale ->
+        from('src/main/resources/assets/begleiter/lang/de_de.json') {
+            into 'assets/begleiter/lang'
+            rename { "${locale}.json" }
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach { options.release = targetJava }
+
+java {
+    withSourcesJar()
+    sourceCompatibility = JavaVersion.toVersion(targetJava)
+    targetCompatibility = JavaVersion.toVersion(targetJava)
+}
+
+// Include the exact rebuildable source with every mod jar (LGPL 3 section 4d0).
+// The source archive never reads build outputs, game saves or local settings.
+def sourceDistribution = tasks.register('sourceDistribution', Zip) {
+    archiveBaseName = base.archivesName
+    archiveVersion = project.version.toString()
+    archiveClassifier = 'sources'
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    from(projectDir) {
+        include 'src/**', 'gradle/**', 'gradlew', 'gradlew.bat'
+        include 'build.gradle', 'settings.gradle', 'gradle.properties'
+        include 'LICENSE', 'LICENSES/**', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README.de.md', 'CHANGELOG.md'
+        include 'tools/benchmarks/**', 'tools/compare-pathing.gradle', 'docs/baritone-vergleich.md'
+        include 'tools/build_request_storage.py', 'tools/request_storage_materials.json', 'tools/write_request_storage_report.py'
+        include 'tools/build_survival_storage.py', 'docs/survival-kistenraum-12.md'
+        include 'docs/survival-kistenraum-24.md'
+        include 'docs/zentrallager-128.md', 'docs/zentrallager-128-koordinaten.md'
+    }
+}
+
+// Gleicher Commit → gleiche Archive (keine Zeitstempel, feste Reihenfolge).
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.withType(Jar).configureEach {
+    from('LICENSE')
+    from('THIRD_PARTY_NOTICES.md')
+    from('LICENSES') { into 'LICENSES' }
+}
+
+tasks.named('jar', Jar) {
+    from(sourceDistribution) {
+        into 'META-INF'
+        rename { 'begleiter-sources.zip' }
+    }
+}
+
+// Gezielt testen: .\gradlew runGameTest -PtestFilter="begleiter-gametest:bot_debug*" (Glob auf die Test-ID, z.B. nav_*,
+// companion_game_tests*); ohne Angabe laufen alle.
+def generateRequestStorage = tasks.register('generateRequestStorage', Exec) {
+    workingDir projectDir
+    commandLine 'python', 'tools/build_request_storage.py'
+    inputs.files 'tools/build_request_storage.py', 'tools/request_storage_materials.json'
+    outputs.files(['prototype', 'network', 'full', 'complete', 'complete-mini', 'unloader'].collect {
+        layout.buildDirectory.file("request-storage/${it}.nbt")
+    })
+    outputs.files(['network', 'full', 'complete', 'complete-mini'].collect {
+        layout.buildDirectory.file("request-storage/${it}.json")
+    })
+}
+def generateSurvivalStorage = tasks.register('generateSurvivalStorage', Exec) {
+    workingDir projectDir
+    commandLine 'python', 'tools/build_survival_storage.py'
+}
+// Die Mod liefert keine Minecraft-Übersetzungen mit. GameTests laufen ohne Client, deshalb bekommen sie die
+// deutschen Item-Namen aus den von Loom geladenen Spiel-Assets (wie im echten Spiel über CompanionClient).
+def vanillaLanguageFiles = { ->
+    def indexes = new File(gradle.gradleUserHomeDir, 'caches/fabric-loom/assets/indexes')
+    def index = indexes.listFiles()?.findAll { it.name.startsWith("${minecraft_version}-") || it.name == "${minecraft_version}.json" }
+            ?.max { it.lastModified() }
+    if (index == null) throw new GradleException("Minecraft asset index for ${minecraft_version} not found; run downloadAssets")
+    def hash = new groovy.json.JsonSlurper().parse(index).objects['minecraft/lang/de_de.json']?.hash
+    if (hash == null) throw new GradleException("de_de.json missing from ${index.name}")
+    new File(indexes.parentFile, "objects/${hash.substring(0, 2)}/${hash}").absolutePath
+}
+tasks.named("runGameTest") {
+    dependsOn 'downloadAssets'
+    doFirst { systemProperty "begleiter.languageFiles", vanillaLanguageFiles() }
+    if (providers.gradleProperty("survivalStorage").isPresent()) {
+        dependsOn generateSurvivalStorage
+        systemProperty "begleiter.survivalStorage", "true"
+        systemProperty "begleiter.survivalStorageFile", file('build/survival-storage/compact.nbt').absolutePath
+        systemProperty "begleiter.survivalStorageRotation", providers.gradleProperty('survivalStorageRotation').getOrElse('0')
+    }
+    if (providers.gradleProperty("navSliceBenchmark").isPresent())
+        systemProperty "begleiter.nav.sliceBenchmark", providers.gradleProperty("navSliceBenchmark").get().toBoolean()
+    if (providers.gradleProperty("navBenchmark").isPresent())
+        systemProperty "begleiter.nav.benchmark", providers.gradleProperty("navBenchmark").get().toBoolean()
+    if (providers.gradleProperty("intelligenceEnabled").isPresent())
+        systemProperty "begleiter.intelligence.enabled", providers.gradleProperty("intelligenceEnabled").get().toBoolean()
+    if (providers.gradleProperty("testFilter").isPresent())
+        systemProperty "fabric-api.gametest.filter", providers.gradleProperty("testFilter").get()
+    // Ganzen Schematic-Ordner wie einen Kreativ-Bau prüfen (SchematicFolderAudit), Ergebnis als AUDIT-Zeilen im Log
+    if (providers.gradleProperty("schematicAudit").isPresent())
+        systemProperty "begleiter.schematicAudit", providers.gradleProperty("schematicAudit").get()
+    if (providers.gradleProperty("schematicOperations").isPresent())
+        systemProperty "begleiter.schematicOperations", "true"
+    if (providers.gradleProperty("requestStorage").isPresent()) {
+        dependsOn generateRequestStorage
+        systemProperty "begleiter.requestStorage", "true"
+        systemProperty "begleiter.requestStorageSource", file("build/request-storage/prototype.nbt").absolutePath
+        systemProperty "begleiter.requestStorageNetwork", file(providers.gradleProperty("requestStorageCompleteMini").isPresent() ? "build/request-storage/complete-mini.nbt" : providers.gradleProperty("requestStorageComplete").isPresent() ? "build/request-storage/complete.nbt" : providers.gradleProperty("requestStorageFull").isPresent() ? "build/request-storage/full.nbt" : "build/request-storage/network.nbt").absolutePath
+        systemProperty "begleiter.requestStorageRotation", providers.gradleProperty("requestStorageRotation").getOrElse("0")
+    }
+}
+
+// CI verwendet einen expliziten 24-Bit-Xvfb-Bildschirm; keinen zweiten X-Server darin starten.
+tasks.named("runClientGameTest") {
+    if (providers.environmentVariable("BEGLEITER_EXTERNAL_XVFB").isPresent()) useXvfb = false
+}
+
+// Einzelne Client-Testklasse: -PclientTestClass=ZoneDutyClientTest (ohne Angabe alle außer Beobachtungsläufen).
+// Beobachtungsläufe (kein Pass/Fail, sehr lang) laufen nur, wenn sie ausdrücklich per clientTestClass gewählt sind.
+tasks.named('runClientGameTest') {
+    if (providers.gradleProperty('survivalStorage').isPresent()) {
+        dependsOn generateSurvivalStorage
+        systemProperty 'begleiter.survivalStorageFile', file('build/survival-storage/compact.nbt').absolutePath
+    }
+}
+def observationClientTests = ["dev.begleiter.DragonFightClientTest", "dev.begleiter.SurvivalStoragePreviewClientTest"]
+tasks.named("processGametestResources") {
+    def selectedClientTest = providers.gradleProperty("clientTestClass").orElse("")
+    inputs.property("clientTestClass", selectedClientTest)
+    doLast {
+        def metadataFile = new File(destinationDir, "fabric.mod.json")
+        def metadata = new groovy.json.JsonSlurper().parse(metadataFile)
+        def all = metadata.entrypoints['fabric-client-gametest']
+        def selected
+        if (selectedClientTest.get().isEmpty()) {
+            selected = all.findAll { !(it in observationClientTests) }
+        } else {
+            selected = all.findAll { it == "dev.begleiter.${selectedClientTest.get()}".toString() }
+            if (selected.size() != 1) throw new GradleException("Unknown client game test: ${selectedClientTest.get()}")
+        }
+        metadata.entrypoints['fabric-client-gametest'] = selected
+        metadataFile.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(metadata)), 'UTF-8')
+    }
+}
+
+// Reine Logiktests laufen ohne Minecraft-Start und sind Teil von check/build.
+tasks.named("test") {
+    useJUnitPlatform()
+}
+
+// Prüft die tatsächlich gepackte Mod, damit ein Port keine fremde Minecraft-Version freigibt.
+def modArchive = tasks.named("jar").flatMap { it.archiveFile }
+def expectedDependencies = [minecraft: project.minecraft_version, fabricloader: ">=${project.loader_version}".toString(),
+                            java: ">=${project.java_version}".toString(), 'fabric-api': ">=${project.fabric_api_version}".toString()]
+def expectedModVersion = project.version.toString()
+tasks.register("verifyPackagedMod") {
+    dependsOn tasks.named("jar")
+    inputs.file(modArchive)
+    inputs.properties(expectedDependencies + [version: expectedModVersion])
+    doLast {
+        def archive = new java.util.zip.ZipFile(modArchive.get().asFile)
+        try {
+            def entry = archive.getEntry('fabric.mod.json')
+            if (entry == null) throw new GradleException('fabric.mod.json fehlt im Mod-JAR')
+            def metadata = new groovy.json.JsonSlurper().parse(archive.getInputStream(entry))
+            expectedDependencies.each { key, value ->
+                if (metadata.depends[key] != value)
+                    throw new GradleException("Mod-JAR deklariert falsches ${key}: ${metadata.depends[key]} statt ${value}")
+            }
+            if (metadata.version != expectedModVersion)
+                throw new GradleException('Mod-JAR enthält eine abweichende Modversion')
+            if (metadata.icon == null || archive.getEntry(metadata.icon) == null)
+                throw new GradleException('Mod-Icon fehlt im Mod-JAR')
+            ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'META-INF/begleiter-sources.zip'].each { required ->
+                if (archive.getEntry(required) == null) throw new GradleException("${required} fehlt im Mod-JAR")
+            }
+            if (archive.entries().toList().any { it.name.contains('GameTest') || it.name.endsWith('ClientTest.class') })
+                throw new GradleException('Mod-JAR enthält Testklassen')
+            // Keine Minecraft-Übersetzungen mitliefern: deutsche Item-Namen liest der Client aus dem installierten Spiel.
+            if (archive.entries().toList().any { it.name.matches('assets/minecraft/lang/.*') || it.name == 'assets/begleiter/item_names.json' })
+                throw new GradleException('Mod-JAR enthält Minecraft-Sprachdateien')
+            def german = archive.getEntry('assets/begleiter/lang/de_de.json')
+            if (german == null) throw new GradleException('Deutscher Sprachkatalog fehlt im Mod-JAR')
+            def germanBytes = archive.getInputStream(german).withCloseable { it.readAllBytes() }
+            ['de_at', 'de_ch'].each { locale ->
+                def alias = archive.getEntry("assets/begleiter/lang/${locale}.json")
+                if (alias == null) throw new GradleException("Sprachkatalog ${locale} fehlt im Mod-JAR")
+                def aliasBytes = archive.getInputStream(alias).withCloseable { it.readAllBytes() }
+                if (!java.util.Arrays.equals(germanBytes, aliasBytes))
+                    throw new GradleException("Sprachkatalog ${locale} weicht von de_de ab")
+            }
+            ['main', 'client'].each { side ->
+                metadata.entrypoints[side].each { name ->
+                    if (archive.getEntry(name.replace('.', '/') + '.class') == null)
+                        throw new GradleException("Mod-Einstiegspunkt fehlt im JAR: ${name}")
+                }
+            }
+        } finally {
+            archive.close()
+        }
+    }
+}
+tasks.named("check") { dependsOn tasks.named("verifyPackagedMod") }

@@ -1,0 +1,5 @@
+{
+  "type": "minecraft:smithing_transform",
+  "base": "minecraft:amethyst_shard",
+  "result": {"id": "begleiter-test:diamond"}
+}

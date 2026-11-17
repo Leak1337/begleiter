@@ -1,0 +1,17 @@
+allprojects {
+    afterEvaluate {
+        sourceSets {
+            comparison {
+                java.srcDir rootProject.file('tools/benchmarks')
+                compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+                runtimeClasspath += output + compileClasspath
+            }
+        }
+        tasks.register('compareBaritone', JavaExec) {
+            dependsOn tasks.named('comparisonClasses')
+            classpath = sourceSets.comparison.runtimeClasspath
+            mainClass = 'dev.begleiter.nav.HeapComparison'
+            maxHeapSize = '1G'
+        }
+    }
+}

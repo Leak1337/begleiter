@@ -1,0 +1,15 @@
+# Schematic-Schauwelt
+
+Kreativ, flache Welt. Start: 0 -60 0. Jeder Bauplatz hat Schilder mit Zweck, Bedienung und Voraussetzungen.
+
+Zum Schutz der Ausstellung sind Tageszeit, natürliche Mobspawns, Feuer und TNT-Explosionen zunächst pausiert.
+Für einen gezielten Funktionstest kannst du die passenden Regeln aktivieren:
+
+- `/gamerule minecraft:spawn_mobs true`
+- `/gamerule minecraft:advance_time true`
+- `/gamerule minecraft:tnt_explodes true`
+
+Dimensionsabhängige Farmen sind in dieser Oberwelt Anschauungsmodelle. Eine Endermanfarm braucht beispielsweise das Ende. Die ausgeschalteten Spawns und Tageszyklen sind keine Betriebsbedingungen für Eisen- oder Monsterfarmen.
+
+Die folgenden Teleportbefehle führen jeweils zum beschilderten Eingang:
+
