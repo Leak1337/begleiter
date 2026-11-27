@@ -64,6 +64,16 @@ public final class CompanionBuilder {
     /** Steht dort, was der Plan will? Betriebszustände (Strom, Licht, Wachstum ...) werden ignoriert. */
     public static boolean matches(BlockState world, BlockState target) {
         if (world.equals(target)) return true;
+        // Beobachtet: beim Hausflicken Birkentür und Werkbänke abgerissen. Tür ist Tür, und Einrichtung
+        // (Werkbank, Ofen, Kiste, Fackel, Bett) steht dort, wo der Plan nur Luft will, zu Recht
+        var wb = world.getBlock();
+        if (wb instanceof net.minecraft.world.level.block.DoorBlock && target.getBlock() instanceof net.minecraft.world.level.block.DoorBlock)
+            return true;
+        if (target.isAir() && (wb == net.minecraft.world.level.block.Blocks.CRAFTING_TABLE
+                || wb instanceof net.minecraft.world.level.block.AbstractFurnaceBlock
+                || wb instanceof net.minecraft.world.level.block.ChestBlock
+                || wb instanceof net.minecraft.world.level.block.BedBlock
+                || wb instanceof net.minecraft.world.level.block.BaseTorchBlock)) return true;
         if (world.getBlock() != target.getBlock()) return false;
         boolean shaped = shapeFromNeighbours(target);
         for (var prop : target.getProperties()) {
@@ -101,11 +111,15 @@ public final class CompanionBuilder {
          */
         public BlockPos approachFor;
         public int approachSince;
+        /** Wie oft der Abbau an der aktuellen Stelle schon angestoßen wurde (nicht gespeichert), gegen Endlosschleifen. */
+        public int breakIndex = -1, breakTries;
         /** Block-Daten aus dem Schematic (Inhalte, Crafter-Slots, Schildtext), beim Setzen übernommen. */
         public final Map<BlockPos, net.minecraft.nbt.CompoundTag> data = new HashMap<>();
         /** Lebewesen aus dem Schematic (Welt-Positionen); nach Fertigstellung nur im Kreativ-Bau gesetzt. */
         public final List<CompanionSchematics.EntityPlan> entities = new ArrayList<>();
         private String dimension;
+        /** Zuletzt gezähltes Restmaterial (nicht gespeichert), siehe {@link CompanionBuilder#remaining}. */
+        MaterialCount materials;
 
         public boolean inDimension(ServerLevel level) {
             String current = level.dimension().identifier().toString();
@@ -574,8 +588,58 @@ public final class CompanionBuilder {
         return 1;
     }
 
-    /** Material, das für den Rest noch gesetzt werden muss (was schon richtig steht, zählt nicht). */
+    /** So lange gilt eine Zählung höchstens, danach wird neu gezählt (Spieler, Mobs, Wachstum ändern die Welt). */
+    static final int MATERIAL_CACHE_TICKS = 200;
+    /** Für Tests: Anzahl vollständiger Zählungen über den Bauplan. */
+    static long materialRecounts;
+
+    /** Gezähltes Restmaterial eines Auftrags: Welt, Zeitpunkt und Bauindex der Zählung. */
+    static final class MaterialCount {
+        final ServerLevel level;
+        final long at;
+        int index;
+        final Map<Item, Integer> counts;
+
+        MaterialCount(ServerLevel level, long at, int index, Map<Item, Integer> counts) {
+            this.level = level;
+            this.at = at;
+            this.index = index;
+            this.counts = counts;
+        }
+    }
+
+    /**
+     * Material, das für den Rest noch gesetzt werden muss (was schon richtig steht, zählt nicht). Eine Zählung gilt
+     * höchstens {@link #MATERIAL_CACHE_TICKS} Ticks; selbst gesetzte Blöcke zieht {@link #notePlaced} sofort ab. Neu
+     * gezählt wird nach Ablauf, bei Rücksprung des Index (Ausbessern), Weltwechsel und für jeden neuen Auftrag.
+     * Liefert eine eigene, veränderbare Kopie.
+     */
     public static Map<Item, Integer> remaining(ServerLevel sl, BuildJob job) {
+        long now = sl.getGameTime();
+        MaterialCount cached = job.materials;
+        if (cached == null || cached.level != sl || job.index < cached.index || now - cached.at >= MATERIAL_CACHE_TICKS) {
+            cached = new MaterialCount(sl, now, job.index, count(sl, job));
+            job.materials = cached;
+        }
+        cached.index = job.index;
+        return new LinkedHashMap<>(cached.counts);
+    }
+
+    /** Auftrag selbst gesetzt: aus der gemerkten Zählung abziehen, statt den ganzen Plan neu zu zählen. */
+    public static void notePlaced(BuildJob job, Placement p) {
+        if (job.materials == null) return;
+        Item it = itemFor(p.state());
+        if (it == null) return;
+        job.materials.counts.computeIfPresent(it, (item, n) -> n > itemCount(p.state()) ? n - itemCount(p.state()) : null);
+    }
+
+    /** Gemerkte Zählung verwerfen (z. B. nach Änderungen am Plan). */
+    static void forgetMaterials(BuildJob job) {
+        job.materials = null;
+    }
+
+    private static Map<Item, Integer> count(ServerLevel sl, BuildJob job) {
+        materialRecounts++;
         Map<Item, Integer> m = new LinkedHashMap<>();
         for (int i = job.index; i < job.order.size(); i++) {
             Placement p = job.order.get(i);
@@ -623,8 +687,8 @@ public final class CompanionBuilder {
             if (state.is(Blocks.OBSERVER)) {
                 var facing = state.getValue(ObserverBlock.FACING);
                 var other = p.relative(facing);
-                var neighbour = sl.getBlockState(other);
-                if (p.compareTo(other) < 0 && neighbour.is(Blocks.OBSERVER)
+                var neighbour = dev.begleiter.world.SafeLevel.state(sl, other); // Nachbar kann im ungeladenen Chunk liegen
+                if (neighbour != null && p.compareTo(other) < 0 && neighbour.is(Blocks.OBSERVER)
                         && neighbour.getValue(ObserverBlock.FACING) == facing.getOpposite())
                     sl.scheduleTick(p, state.getBlock(), 2);
             }
@@ -640,6 +704,8 @@ public final class CompanionBuilder {
             if (p.state().isAir() && grownColumn(sl, p.pos(), actual)) { dynamic++; continue; }
             // Fließendes Wasser/Lava aus einer gebauten Quelle in geplanter Luft (Farm-Rinnen): ebenfalls Betrieb
             if (p.state().isAir() && actual.getBlock() instanceof LiquidBlock && !actual.getFluidState().isSource()) { dynamic++; continue; }
+            // Gras/Myzel wächst über Erde, Weichen schalten Schienen um: Welt, kein Baufehler
+            if (naturalChange(p.state(), actual)) { dynamic++; continue; }
             // Terraforming lässt nach der Planung Gebautes bewusst stehen: erlaubte Ausnahme, kein fehlender Block.
             if (job.terrainOnly && (sl.getBlockEntity(p.pos()) != null || !CompanionTerraform.natural(sl, p.pos(), actual))) {
                 preserved++;
@@ -648,6 +714,19 @@ public final class CompanionBuilder {
             wrong++;
         }
         return new Verification(wrong, unknown, dynamic, preserved);
+    }
+
+    /**
+     * Änderungen, die die Welt selbst am fertigen Bau vornimmt und die eine Ausbesserung sofort wieder rückgängig
+     * machen würde: Gras/Myzel breitet sich auf Erde aus, bedecktes Gras wird zu Erde,
+     * eine einfache Schiene ändert ihre Form (Weiche per Redstone, Anschluss an Nachbarschienen).
+     */
+    static boolean naturalChange(BlockState expected, BlockState actual) {
+        Block want = expected.getBlock(), have = actual.getBlock();
+        if (want == Blocks.DIRT) return have == Blocks.GRASS_BLOCK || have == Blocks.MYCELIUM;
+        // Ausgetrockneter Ackerboden zählt nicht: ist inzwischen Wasser da, hält die Ausbesserung, sonst meldet er es
+        if (want == Blocks.GRASS_BLOCK || want == Blocks.MYCELIUM) return have == Blocks.DIRT;
+        return want == Blocks.RAIL && have == Blocks.RAIL;
     }
 
     /** Säulenpflanze, die aus derselben Pflanze darunter nachgewachsen ist (Bambus, Zuckerrohr, Kaktus, Seetang). */
@@ -703,6 +782,41 @@ public final class CompanionBuilder {
 
 
     // ------------------------------------------------------------------ Material beschaffen (Survival)
+
+    /** When already at home, collect surplus for the next group of placements in one visit. */
+    public static void stageBuildMaterials(CompanionEntity mob, ServerLevel world, BuildJob job) {
+        BlockPos home = mob.getHome();
+        Container box = CompanionTripPreparation.reachableHomeStorage(mob, world, home);
+        if (box == null) return;
+        int lookAhead = mob.work.is(CompanionWork.Kind.BUILD) ? mob.work.remaining() : 24;
+        int packed = 0;
+        for (var need : upcomingMaterials(world, job, lookAhead).entrySet()) {
+            Item item = need.getKey();
+            int missing = Math.min(need.getValue(), mob.work.inputAllowance(item)) - mob.getInventory().countItem(item);
+            int available = box.countItem(item) - mob.stockReserveAt(world, home, item);
+            int amount = Math.min(missing, available);
+            if (amount <= 0) continue;
+            var preview = new CompanionPrerequisites.Inventory(mob, true);
+            if (preview.addFrom(box, item, amount) != 0 || preview.freeSlots() < 2) continue;
+            packed += takeFrom(mob, box, item, amount);
+        }
+        if (packed > 0) {
+            CompanionTripPreparation.recordStorageUse(mob, world, home, box);
+            mob.logInfo(CompanionTexts.tr("order.build_packed", packed));
+        }
+    }
+
+    /** Forecast the next positions from loaded world state, including material counts for multi-item placements. */
+    static Map<Item, Integer> upcomingMaterials(ServerLevel world, BuildJob job, int lookAhead) {
+        Map<Item, Integer> upcoming = new java.util.LinkedHashMap<>();
+        for (int i = job.index; i < Math.min(job.index + lookAhead, job.order.size()); i++) {
+            var block = job.order.get(i);
+            if (!world.hasChunkAt(block.pos()) || matches(world.getBlockState(block.pos()), block.state())) continue;
+            Item item = itemFor(block.state());
+            if (item != null && item != Items.AIR) upcoming.merge(item, itemCount(block.state()), Integer::sum);
+        }
+        return upcoming;
+    }
 
     /** Rohstoffe, die er abbauen kann. */
     static Resources.Res rawSource(Item item) {

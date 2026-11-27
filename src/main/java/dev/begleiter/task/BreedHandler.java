@@ -45,6 +45,7 @@ final class BreedHandler implements TaskHandler {
         CompanionJobs.feed(mob, target);
         mob.logInfo(CompanionTexts.tr("jobs.breed.fed", target.getName(), target.blockPosition().toShortString()));
         fed++;
+        mob.work.progress(1);
         target = null;
         return Status.RUNNING;
     }

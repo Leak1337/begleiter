@@ -292,7 +292,7 @@ public class CompanionGameTests {
         b.setItem(3, new ItemStack(Items.DIRT, 20));
         b.setItem(7, new ItemStack(Items.APPLE, 3));
 
-        int n = c.sortChests(h.getLevel(), h.absolutePos(new BlockPos(3, 1, 4)));
+        int n = c.storage.sortChests(h.getLevel(), h.absolutePos(new BlockPos(3, 1, 4)));
 
         h.assertValueEqual(n, 2, "Anzahl sortierter Kisten");
         List<ItemStack> all = new ArrayList<>();
@@ -394,8 +394,8 @@ public class CompanionGameTests {
                 new ItemStack(Items.APPLE));
         ie.setNoGravity(true);
         h.getLevel().addFreshEntity(ie);
-        h.assertTrue(!c.collectible(ie), "Apfel auf dem Baum gilt als erreichbar");
-        h.assertTrue(!c.looseItemsNearby(), "Planer würde zum Apfel auf dem Baum laufen");
+        h.assertTrue(!c.pickup.collectible(ie), "Apfel auf dem Baum gilt als erreichbar");
+        h.assertTrue(!c.pickup.looseItemsNearby(), "Planer würde zum Apfel auf dem Baum laufen");
         h.succeed();
     }
 
@@ -459,7 +459,7 @@ public class CompanionGameTests {
         BlockPos feet = h.absolutePos(new BlockPos(4, 1, 4));
         owner.snapTo(feet.getX() + 0.5, feet.getY(), feet.getZ() + 0.5, 0, 0);
         c.giveToInventory(new ItemStack(Items.DIAMOND, 3));
-        h.assertValueEqual(c.safeDropSpot(h.getLevel(), owner), feet, "Abwurfstelle");
+        h.assertValueEqual(c.items.safeDropSpot(h.getLevel(), owner), feet, "Abwurfstelle");
         h.assertValueEqual(c.giveTo(owner, "item:minecraft:diamond", 3), 3, "Abgabe");
         h.runAfterDelay(40, () -> {
             int lying = h.getLevel().getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class,
@@ -710,7 +710,7 @@ public class CompanionGameTests {
         c.addTask(Task.portal(site));
 
         h.succeedWhen(() -> {
-            h.assertTrue(h.getLevel().getBlockState(CompanionEntity.portalInside(site).getFirst()).is(Blocks.NETHER_PORTAL),
+            h.assertTrue(h.getLevel().getBlockState(CompanionPortals.inside(site).getFirst()).is(Blocks.NETHER_PORTAL),
                     "Kein Portal (Aufgabe " + c.currentTaskText() + ", Obsidian übrig " + CompanionCraft.count(c, "obsidian") + ")");
             h.assertValueEqual(c.getPortalPos(), site, "Portal nicht gemerkt");
         });
@@ -1026,7 +1026,7 @@ public class CompanionGameTests {
         CompanionEntity c = companion(h, new BlockPos(2, 1, 3));
         c.stay();
         h.runAfterDelay(5, () -> {
-            var dig = c.tunnel(Direction.EAST, 6);
+            var dig = c.gathering.tunnel(Direction.EAST, 6);
             BlockPos chest = h.absolutePos(new BlockPos(4, 1, 3));
             h.assertTrue(dig.stream().anyMatch(t -> t.type() == TaskType.BREAK), "Gräbt gar nicht (Test kaputt)");
             h.assertTrue(dig.stream().noneMatch(t -> chest.equals(t.pos())), "Plant die Kiste wegzugraben");
@@ -1260,7 +1260,7 @@ public class CompanionGameTests {
         h.succeedWhen(() -> {
             h.assertValueEqual(CompanionCraft.count(c, "raw_gold"), 0, "Nicht eingelagert");
             h.assertTrue(c.memory.chestWith(Items.RAW_GOLD, h.getLevel(), chest, 8) != null, "Neue Kiste nicht gemerkt");
-            h.assertTrue(c.storageChests(h.getLevel()).size() >= 2, "Keine weitere Kiste");
+            h.assertTrue(c.storage.storageChests(h.getLevel()).size() >= 2, "Keine weitere Kiste");
         });
     }
 
@@ -1595,7 +1595,7 @@ public class CompanionGameTests {
         c.stay();
         c.giveToInventory(new ItemStack(Items.STONE_PICKAXE));
         h.spawn(net.minecraft.world.entity.EntityTypes.COW, new BlockPos(5, 1, 5));
-        c.hunger = 4;
+        c.food.set(4);
 
         // Spieler-Befehl: nie unterbrechen
         c.addTask(Task.gather(Resources.STONE.key(), 5));
@@ -1619,7 +1619,7 @@ public class CompanionGameTests {
         c.stay();
         c.giveToInventory(new ItemStack(Items.STONE_PICKAXE));
         c.giveToInventory(new ItemStack(Items.BREAD, 2));
-        c.hunger = 4; // hungrig, aber keine Tiere und etwas Brot: Jagen geht nicht
+        c.food.set(4); // hungrig, aber keine Tiere und etwas Brot: Jagen geht nicht
         CompanionNeeds.decide(c);
         h.assertTrue(c.goal != CompanionNeeds.Need.HUNGER, "Hunger-Ziel ohne Tiere gewählt");
         h.assertTrue(c.hasTasks(), "Kein Ersatz-Ziel");
@@ -2565,7 +2565,7 @@ public class CompanionGameTests {
         c.addTask(Task.tree(h.absolutePos(new BlockPos(6, 1, 6)), 7));
         h.succeedWhen(() -> {
             h.assertTrue(!c.hasTasks(), "Noch bei der Arbeit: " + c.currentTaskText());
-            h.assertTrue(!c.hasScaffold(), "Gerüst steht noch (" + c.scaffold.size() + " Blöcke)");
+            h.assertTrue(!c.hasScaffold(), "Gerüst steht noch (" + c.scaffolding.size() + " Blöcke)");
             h.assertValueEqual(h.relativePos(c.blockPosition()).getY(), 1, "Steht nicht wieder unten");
             h.assertValueEqual(CompanionCraft.count(c, "oak_log"), 7, "Stämme im Inventar");
         });

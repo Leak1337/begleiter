@@ -21,18 +21,18 @@ final class DescendHandler implements TaskHandler {
         if (!mob.hasScaffold()) return Status.DONE;
         BlockPos under = mob.blockPosition().below();
         BlockPos pick = null;
-        if (mob.scaffold.contains(under)) pick = under;
+        if (mob.scaffolding.contains(under)) pick = under;
         else {
             double best = -1;
-            for (BlockPos p : mob.scaffold)
+            for (BlockPos p : mob.scaffolding.positions())
                 if (mob.getEyePosition().distanceToSqr(Vec3.atCenterOf(p)) <= 4.3 * 4.3 && p.getY() > best) { best = p.getY(); pick = p; }
         }
         if (pick == null) {
-            mob.logWarn(CompanionTexts.tr("handler.descend.unreachable", mob.scaffold.size()));
-            mob.scaffold.clear();
+            mob.logWarn(CompanionTexts.tr("handler.descend.unreachable", mob.scaffolding.size()));
+            mob.scaffolding.clear();
             return Status.FAILED;
         }
-        mob.scaffold.remove(pick);
+        mob.scaffolding.forget(pick);
         mob.pushFront(Task.breakAt(pick, sl.getBlockState(pick).getBlock()));
         return Status.REPLACED;
     }

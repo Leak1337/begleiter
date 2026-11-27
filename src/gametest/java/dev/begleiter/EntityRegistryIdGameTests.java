@@ -25,9 +25,9 @@ public class EntityRegistryIdGameTests {
         var c = companion(h);
         var foreign = h.spawn(RegistryIdTestItems.COW, new BlockPos(3, 1, 2)); foreign.setNoAi(true);
         var vanilla = h.spawn(EntityTypes.COW, new BlockPos(4, 1, 2)); vanilla.setNoAi(true);
-        h.assertTrue(c.nearestOfType("cow", 4, null) == vanilla, "Vanilla-Alias findet fremde Kuh");
-        h.assertTrue(c.nearestOfType("minecraft:cow", 4, null) == vanilla, "Volle Vanilla-ID findet falsches Tier");
-        h.assertTrue(c.nearestOfType("begleiter-test:cow", 4, null) == foreign, "Fremde Entity-ID verloren");
+        h.assertTrue(c.expedition.nearestOfType("cow", 4, null) == vanilla, "Vanilla-Alias findet fremde Kuh");
+        h.assertTrue(c.expedition.nearestOfType("minecraft:cow", 4, null) == vanilla, "Volle Vanilla-ID findet falsches Tier");
+        h.assertTrue(c.expedition.nearestOfType("begleiter-test:cow", 4, null) == foreign, "Fremde Entity-ID verloren");
         h.succeed();
     }
 

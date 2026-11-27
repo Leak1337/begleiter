@@ -36,7 +36,8 @@ public final class IntentTools {
     public static final int MAX_TEXT = 256;
 
     /** Zerstörerische Befehle nur über den eindeutigen Lexikon-Satz, nie über eine Vermutung des Modells. */
-    public static final Set<ChatIntent> EXCLUDED = EnumSet.of(ChatIntent.MEMORY_CLEAR);
+    // Gesprächigkeit erkennt das Lexikon sicher; im Prompt kostete sie bei jeder Anfrage Tokens
+    public static final Set<ChatIntent> EXCLUDED = EnumSet.of(ChatIntent.MEMORY_CLEAR, ChatIntent.TALK_LESS, ChatIntent.TALK_MORE);
 
     /** Prüft Registry-IDs ohne Namensraum ("iron_pickaxe", "sheep"). */
     public interface Ids {
@@ -108,6 +109,8 @@ public final class IntentTools {
      */
     static final Map<ChatIntent, String> DESCRIPTIONS = new EnumMap<>(ChatIntent.class);
     static {
+        d(ChatIntent.TALK_LESS, "fewer unprompted messages");
+        d(ChatIntent.TALK_MORE, "more unprompted messages");
         d(ChatIntent.WAYPOINT_SAVE, "save player's position (waypoint)");
         d(ChatIntent.WAYPOINT_FORGET, "(waypoint)");
         d(ChatIntent.WAYPOINT_LIST, "");
@@ -127,6 +130,7 @@ public final class IntentTools {
         d(ChatIntent.SET_HOME, "use nearby chest as storage");
         d(ChatIntent.FARM, "harvest and replant");
         d(ChatIntent.BREED, "opt mob, count");
+        d(ChatIntent.FISH, "opt count");
         d(ChatIntent.REPAIR, "repair own gear");
         d(ChatIntent.TRADE, "with villagers; opt trade_item, trade_count, sell, for_owner");
         d(ChatIntent.GEAR_UP, "improve own gear; opt tier");

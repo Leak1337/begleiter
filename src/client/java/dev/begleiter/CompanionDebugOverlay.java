@@ -150,7 +150,7 @@ public final class CompanionDebugOverlay {
             case CRAFT, SMELT, STATION, SORT -> 0x5A3090;                         // Herstellen: lila
             case BUILD, HOUSE, PLACE, EXTEND -> 0x8A2E60;                         // Bauen: pink
             case HUNT, FIGHT, CRYSTALS -> 0x902828;                                 // Kampf: rot
-            case WATER, POUR, PORTAL, STRONGHOLD -> 0x206A70;                     // Wasser/Portal: türkis
+            case WATER, POUR, PORTAL, STRONGHOLD, FISH -> 0x206A70;                     // Wasser/Portal: türkis
             case DELIVER, GIVE, FETCH -> 0x806A10;                                  // Bringen: gelb
             default -> 0x404040;
         };

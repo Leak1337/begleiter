@@ -22,6 +22,7 @@ public class CompanionMod implements ModInitializer {
 
     public static EntityType<CompanionEntity> COMPANION;
     public static Item COMPANION_CORE;
+    public static Item COMPANION_WHISTLE;
     public static ExtendedMenuType<CompanionMenu, CompanionSnapshot> CONTROL_MENU;
 
     public static Identifier id(String path) {
@@ -36,6 +37,9 @@ public class CompanionMod implements ModInitializer {
         CompanionPlacement.register();
         CompanionZoneEditor.register();
         CompanionRemoteMenu.register();
+        CompanionWaypointMap.register();
+        CompanionMenuCommands.register();
+        dev.begleiter.task.RealFurnace.register();
         CompanionSchematics.installBundled();
         SchematicShowcase.init();
         PayloadTypeRegistry.clientboundPlay().registerLarge(CompanionBuildPreview.TYPE, CompanionBuildPreview.CODEC,
@@ -52,16 +56,27 @@ public class CompanionMod implements ModInitializer {
         ResourceKey<Item> itemKey = ResourceKey.create(Registries.ITEM, id("companion_core"));
         COMPANION_CORE = Registry.register(BuiltInRegistries.ITEM, itemKey,
                 new CompanionCoreItem(new Item.Properties().setId(itemKey).stacksTo(1)));
+        ResourceKey<Item> whistleKey = ResourceKey.create(Registries.ITEM, id("companion_whistle"));
+        COMPANION_WHISTLE = Registry.register(BuiltInRegistries.ITEM, whistleKey,
+                new CompanionWhistleItem(new Item.Properties().setId(whistleKey).stacksTo(1)));
 
         CommandRegistrationCallback.EVENT.register(CompanionCommands::register);
         ParkourCourse.register();
         TestMap.register();
+        SelfPlayRun.register(); // nur mit -Dbegleiter.selfplay=true (.\gradlew runSelfplay)
         TestScenarios.register();
         dev.begleiter.nav.NavScheduler.register();
+        dev.begleiter.world.CompanionChunkLoader.register();
+        dev.begleiter.config.BegleiterConfig.loadOnStartup();
         dev.begleiter.debug.BotDebugServer.register();
         CompanionHostility.register(); // feindliche Mobs greifen den Begleiter an wie einen Spieler
         dev.begleiter.llm.Llm.reload(); // legt beim ersten Start config/begleiter-llm.json (aus) an
+        // Begleiter, die beim Speichern fern vom Spieler arbeiteten, nach dem Start wecken
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> dev.begleiter.world.CompanionWakeList.get(server).wakeAll(server));
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(server ->
+                dev.begleiter.world.CompanionWakeList.get(server).tick(server));
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
+            dev.begleiter.ai.PlanGate.reset();
             ParkourCourse.reset();
             TestMap.reset();
             TestScenarios.reset();

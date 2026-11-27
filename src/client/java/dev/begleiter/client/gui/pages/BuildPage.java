@@ -15,6 +15,7 @@ import net.minecraft.resources.Identifier;
  * Anzeigeslots. Bauaktionen und Materialbeschaffung bleiben in CompanionMenu/Builder.
  */
 public final class BuildPage implements ControlPage {
+    @Override public boolean quickBar() { return false; }
     private int materialOffset;
     /** Bau-Modus, mit dem der Umschalter beschriftet wurde. */
     private boolean shownCreative;

@@ -37,6 +37,9 @@ final class SmeltHandler implements TaskHandler {
     @Override
     public Status tick(TaskContext ctx) {
         CompanionEntity mob = ctx.mob();
+        var pending = RealFurnace.pending(ctx);
+        if (pending != null) return RealFurnace.resume(ctx, pending, smelt);
+        boolean real = dev.begleiter.config.BegleiterConfig.get().realFurnaces;
         Item target = smelt.item() == null ? null : CompanionCraft.item(smelt.item());
         // Unter allen Ofen-Rezepten für das Ergebnis das, dessen Zutat er dabei hat (Rohkupfer statt Kupfererz ...)
         CompanionRecipes.Smelt recipe = null;
@@ -51,7 +54,7 @@ final class SmeltHandler implements TaskHandler {
                 ctx.abortAutonomousPlan(DecisionOutcome.Reason.MISSING_INPUT);
                 return Status.REPLACED;
             }
-            if (!CompanionCraft.hasFuel(mob)) {
+            if (!real && !CompanionCraft.hasFuel(mob)) {
                 ctx.abortAutonomousPlan(DecisionOutcome.Reason.MISSING_FUEL);
                 return Status.REPLACED;
             }
@@ -60,11 +63,13 @@ final class SmeltHandler implements TaskHandler {
         if (target != null && (recipe == null || CompanionCraft.count(mob, smelt.item()) >= smelt.count()
                 || CompanionRecipes.have(mob, recipe.input()) == 0)) return Status.DONE;
         if (target == null && !CompanionCraft.hasSmeltable(mob)) return Status.DONE;
-        BlockPos furnace = mob.findStation("furnace", 24);
+        BlockPos furnace = !real && mob.hasRecipeRequest() ? mob.findOrderStation("furnace", 24) : mob.findStation("furnace", 24);
         if (ctx.guardedSupply() && furnace == null) {
             ctx.abortAutonomousPlan(DecisionOutcome.Reason.MISSING_STATION);
             return Status.REPLACED;
         }
+        if (furnace == null && mob.recoverRecipeProduction(
+                CompanionTexts.tr("handler.smelt.no_furnace"))) return Status.REPLACED;
         if ((furnace == null || furnace.distSqr(mob.blockPosition()) > 12 * 12) && task.tries() < 2
                 && !ctx.guardedSupply() && CompanionCraft.tier(mob, "pickaxe") > 0 && mob.canCarryStation("furnace")) {
             mob.replaceCurrent(List.of(Task.station("furnace", true),
@@ -89,12 +94,14 @@ final class SmeltHandler implements TaskHandler {
             return Status.REPLACED;
         }
         if (!ctx.approach(furnace, 6.25)) return Status.RUNNING;
+        if (real) return RealFurnace.start(ctx, furnace, target, smelt);
         boolean fuel = target != null ? CompanionCraft.hasFuel(mob) : CompanionCraft.canSmelt(mob);
         if (!fuel) {
             mob.problem(CompanionTexts.tr("handler.smelt.no_fuel"));
             return Status.FAILED;
         }
         mob.getLookControl().setLookAt(Vec3.atCenterOf(furnace));
+        if (progress % 20 == 0) mob.useContainer(ctx.level(), furnace); // sichtbar am Ofen arbeiten
         if (++progress >= 60) {
             if (target != null) CompanionCraft.smeltTarget(mob, target, recipe.input());
             else CompanionCraft.smeltStep(mob, 1);

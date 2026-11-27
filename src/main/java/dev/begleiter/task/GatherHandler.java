@@ -11,6 +11,7 @@ import net.minecraft.world.item.Items;
 
 import dev.begleiter.CompanionCraft;
 import dev.begleiter.CompanionEntity;
+import dev.begleiter.CompanionGathering;
 import dev.begleiter.CompanionEntity.Task;
 import dev.begleiter.CompanionEntity.TaskType;
 import dev.begleiter.CompanionMemory;
@@ -74,7 +75,7 @@ final class GatherHandler implements TaskHandler {
                 || res == Resources.SEEDS;
         List<Task> list = res == Resources.WOOD && gather.exactItem() != null
                 ? mob.buildGather(state -> state.is(net.minecraft.world.level.block.Block.byItem(exactItem())), gather.count(), true)
-                : res == Resources.WOOD ? mob.buildTrees(gather.count()) : mob.buildGather(res.block(), gather.count(), surface);
+                : res == Resources.WOOD ? mob.gathering.buildTrees(gather.count()) : mob.buildGather(res.block(), gather.count(), surface);
         mob.logInfo(CompanionTexts.tr("handler.gather.search", CompanionTexts.resource(res.key()), gather.count(), list.size(), task.tries() + 1));
         if (!list.isEmpty()) {
             List<Task> all = new ArrayList<>(list);
@@ -86,10 +87,11 @@ final class GatherHandler implements TaskHandler {
         // Schon mal gesehen? Dann gezielt dorthin statt blind zu suchen (neue Instanz: neuer Handler-Lauf).
         Task again = new Task(gather, task.tries());
         if (res == Resources.WOOD && ctx.mining().goRemembered(sl, CompanionMemory.Kind.TREE, null, 128, again)) return Status.REPLACED;
-        if (CompanionMemory.isOre(res) && ctx.mining().mineKnownOre(sl, res, gather.count(), again, false)) return Status.REPLACED;
+        if ((CompanionMemory.isOre(res) || res == Resources.GRAVEL)
+                && ctx.mining().mineKnownOre(sl, res, gather.count(), again, false)) return Status.REPLACED;
         // Erz und Stein: unter Tage danach graben wie ein Spieler (Treppe + Stollen)
         if (!surface) {
-            mob.logInfo(CompanionTexts.tr("handler.gather.mine", CompanionTexts.resource(res.key()), CompanionEntity.oreLevel(res.key())));
+            mob.logInfo(CompanionTexts.tr("handler.gather.mine", CompanionTexts.resource(res.key()), CompanionGathering.oreLevel(res.key())));
             mob.replaceCurrent(List.of(new Task(new TaskSpec.Mine(gather.resource(), gather.count(), gather.targetTotal()))));
             return Status.REPLACED;
         }

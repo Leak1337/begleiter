@@ -229,7 +229,9 @@ public class ProcessingRecipeGameTests {
         var goal = new CompanionTaskGoal(mob); goal.tick();
         h.assertTrue(mob.currentTask().spec() instanceof TaskSpec.Process, "Did not start processing");
         h.setBlock(26, 1, 24, Blocks.AIR); goal.tick();
-        h.assertTrue(mob.isPaused() && mob.hasTasks(), "Missing station did not retain a paused chain");
+        // Fehlt die Station, plant er die Herstellung neu; der Auftrag bleibt hinten in der Kette.
+        h.assertTrue(mob.hasTasks() && mob.peekTasks(64).getLast().spec() instanceof TaskSpec.Request
+                && !(mob.currentTask().spec() instanceof TaskSpec.Process), "Missing station did not keep the order chain");
         h.assertValueEqual(count(player, Items.NETHERITE_SWORD), 0, "Reported nonexistent production");
         h.assertValueEqual(CompanionCraft.count(mob, "diamond_sword"), 1, "Base consumed without station");
         h.assertValueEqual(CompanionCraft.count(mob, "netherite_upgrade_smithing_template"), 1, "Template consumed without station");

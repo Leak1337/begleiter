@@ -1,0 +1,24 @@
+{
+  "replace": false,
+  "values": [
+    "minecraft:rotten_flesh",
+    "minecraft:poisonous_potato",
+    "minecraft:spider_eye",
+    "minecraft:gravel",
+    "minecraft:sand",
+    "minecraft:red_sand",
+    "minecraft:kelp",
+    "minecraft:dead_bush",
+    "minecraft:short_grass",
+    "minecraft:tall_grass",
+    "minecraft:fern",
+    "minecraft:pointed_dripstone",
+    "minecraft:bone_block",
+    "minecraft:wheat_seeds",
+    "minecraft:beetroot_seeds",
+    "minecraft:pumpkin_seeds",
+    "minecraft:melon_seeds",
+    "minecraft:egg",
+    "minecraft:ink_sac"
+  ]
+}

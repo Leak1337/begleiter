@@ -100,7 +100,7 @@ public final class CompanionZoneEditor {
             c.zones.put(z);
         } else c.zones.remove(request.kind);
         // Alte automatisch geplante Arbeit nicht im neu markierten Bereich fortsetzen.
-        if (c.duty() != null) { c.holdOrdersComponent(); c.stay(); }
+        if (c.isManualDuty()) { c.holdOrdersComponent(); c.stay(); }
         PENDING.remove(p.getUUID());
         return new Feedback(request.token, true, CompanionTexts.tr(request.operation == 0 ? "zone.saved" : "zone.removed", request.kind.title()));
     }

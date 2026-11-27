@@ -17,8 +17,8 @@ final class HouseHandler implements TaskHandler {
 
     @Override
     public Status tick(TaskContext ctx) {
-        if (extend) ctx.mob().extendStep(task);
-        else ctx.mob().houseStep(task);
+        if (extend) ctx.mob().house.extendStep(task);
+        else ctx.mob().house.step(task);
         return Status.REPLACED;
     }
 }

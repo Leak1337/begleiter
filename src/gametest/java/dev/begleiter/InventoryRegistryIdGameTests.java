@@ -48,7 +48,7 @@ public class InventoryRegistryIdGameTests {
         var c = companion(h);
         for (int i = 0; i < c.getInventory().getContainerSize(); i++)
             c.getInventory().setItem(i, new ItemStack(RegistryIdTestItems.ROTTEN_FLESH, 64));
-        h.assertTrue(!c.makeRoomFor(Items.DIAMOND, true), "Fremdes Item als Vanilla-Abfall abgeworfen");
+        h.assertTrue(!c.items.makeRoomFor(Items.DIAMOND, true), "Fremdes Item als Vanilla-Abfall abgeworfen");
         h.assertValueEqual(c.usedSlotsWithoutClutter(), c.usedSlots(), "Automatischer Abwurf enthält fremde Items");
         h.assertValueEqual(c.getInventory().getItem(0).getCount(), 64, "Fremder Stapel verändert");
         h.succeed();
@@ -76,8 +76,8 @@ public class InventoryRegistryIdGameTests {
         var c = companion(h);
         c.giveToInventory(new ItemStack(RegistryIdTestItems.COBBLESTONE, 20));
         c.giveToInventory(new ItemStack(Items.COBBLESTONE, 3));
-        h.assertTrue(!c.buildMaterials().containsKey(RegistryIdTestItems.COBBLESTONE), "Fremdes Item als Baustein eingeplant");
-        h.assertValueEqual(c.buildMaterials().get(Items.COBBLESTONE), 3, "Vanilla-Baustein verloren");
+        h.assertTrue(!c.house.buildMaterials().containsKey(RegistryIdTestItems.COBBLESTONE), "Fremdes Item als Baustein eingeplant");
+        h.assertValueEqual(c.house.buildMaterials().get(Items.COBBLESTONE), 3, "Vanilla-Baustein verloren");
         h.succeed();
     }
 

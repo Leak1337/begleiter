@@ -91,6 +91,9 @@ public final class LexiconDe implements Lexicon {
 
     @Override public List<ChatIntent> intents(Sentence s) {
         List<ChatIntent> out = new ArrayList<>();
+        // Gesprächigkeit: "Sei leiser", "Rede weniger" / "Sprich mehr", "Sei gesprächiger"
+        if (s.has("leiser", "weniger reden", "rede weniger", "sprich weniger", "red weniger")) out.add(ChatIntent.TALK_LESS);
+        if (s.has("sprich mehr", "rede mehr", "red mehr", "mehr reden", "gespraechiger", "erzaehl mehr")) out.add(ChatIntent.TALK_MORE);
         // Wegpunkte: "Merk dir das als Mine", "Vergiss den Wegpunkt Mine", "Welche Wegpunkte kennst du", "Geh zur Mine"
         if (s.anyStart("merk") && s.any("als")) out.add(ChatIntent.WAYPOINT_SAVE);
         if (s.anyStart("vergiss", "loesch", "entfern")) out.add(ChatIntent.WAYPOINT_FORGET);
@@ -125,6 +128,8 @@ public final class LexiconDe implements Lexicon {
         if ("any".equals(breedMob)) breedMob = null;
         if (s.anyStart("zuecht", "zucht", "vermehr", "nachwuchs") || (s.has("kuemmer") && (s.anyStart("herde", "tiere") || breedMob != null)))
             out.add(ChatIntent.BREED);
+        if (s.any("angeln", "angle", "angelst", "fischen") || (s.anyStart("fang") && s.anyStart("fisch", "lachs", "kabeljau")))
+            out.add(ChatIntent.FISH);
         if (s.anyStart("reparier", "flick") || (s.anyStart("pfleg") && s.anyStart("werkzeug", "ruestung", "ausruestung")))
             out.add(ChatIntent.REPAIR);
         if (s.anyStart("handel", "tausch", "kauf", "verkauf", "eintausch")) out.add(ChatIntent.TRADE);
@@ -205,8 +210,11 @@ public final class LexiconDe implements Lexicon {
                 if (id != null) return id;
             }
         }
+        // "angeln"/"angelst" ist meist das Verb ("Geh angeln"), nur mit Hol-/Mach-/Gib-Verb die Angel(n).
+        boolean wantsThing = s.any(GATHER_VERBS) || s.any(MAKE_VERBS) || s.any(GIVE_VERBS);
         for (String t : tok) {
             if (t.length() < 3) continue;
+            if (!wantsThing && (t.equals("angeln") || t.equals("angelst"))) continue;
             for (var e : ITEMS.entrySet()) if (t.startsWith(e.getKey())) return e.getValue();
         }
         return null;

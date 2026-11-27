@@ -42,21 +42,41 @@ public final class CompanionPlanner {
 
     private static final int MAX_DEPTH = 14;
     /** Rechenbudget pro Planung (Server-Thread), damit tiefe Rezeptbäume nicht ausufern. */
-    private static int budget;
+    static final int BUDGET = 20000;
     /** Kisten-Suche ist teuer (Umkreis absuchen): pro Planung nur einmal je Item. */
-    private static final Map<Item, java.util.Optional<BlockPos>> chestCache = new HashMap<>();
-    private static Boolean hasTable;
-    private static final Map<Item, Boolean> stations = new HashMap<>();
-    private static List<BlockPos> requestBoxes;
     private static final double IMPOSSIBLE = Double.MAX_VALUE;
 
     /** Aufrufzustand darf nicht in die nächste Welt übernommen werden. */
-    public static void reset() {
-        budget = 0;
-        chestCache.clear();
-        hasTable = null;
-        stations.clear();
-        requestBoxes = null;
+    /**
+     * Früher wurden hier statische Caches geleert. Jede Planung hat jetzt ihren eigenen {@link PlanContext}; es gibt
+     * keinen veränderbaren statischen Planungszustand mehr. Bleibt für die Lebenszyklus-Aufrufe erhalten.
+     */
+    public static void reset() { }
+
+    /**
+     * Zustand genau einer Planung: Rechenbudget, Kisten- und Stationscache, Werkbank-Status, Anfrage-Kisten sowie
+     * Begleiter und Welt. Wird mit dem {@link State} geteilt (auch über dessen Kopien), nie zwischen Planungen.
+     */
+    static final class PlanContext {
+        final CompanionEntity entity;
+        final ServerLevel level;
+        int budget = BUDGET;
+        final Map<Item, java.util.Optional<BlockPos>> chestCache = new HashMap<>();
+        Boolean hasTable;
+        final Map<Item, Boolean> stations = new HashMap<>();
+        List<BlockPos> requestBoxes;
+        /** Kisten im Umkreis 16, einmal je Planung gesucht (vorher: ganzer Würfel für jede Zutat erneut). */
+        private List<BlockPos> nearbyContainers;
+
+        List<BlockPos> nearbyContainers() {
+            if (nearbyContainers == null) nearbyContainers = entity.storage.containerCandidates(16);
+            return nearbyContainers;
+        }
+
+        PlanContext(CompanionEntity entity, ServerLevel level) {
+            this.entity = entity;
+            this.level = level;
+        }
     }
 
     /** Gedachtes Inventar + bisher geplante Aufgaben. */
@@ -72,22 +92,31 @@ public final class CompanionPlanner {
         boolean prepared, valid = true;
         boolean playerRequest;
         BlockPos excludedChest;
+        BlockPos destination;
+        Item destinationItem;
+        Item preferredFuel;
         final Map<BlockPos, Map<Item, Integer>> chestTaken = new HashMap<>();
         CompanionPrerequisites.Inventory inventory;
         int[] pickUses;
         final Set<Item> installed = new HashSet<>();
-        State(Map<Item, Integer> have, List<Task> tasks, List<String> steps, int pickTier, double cost, RoutePolicy policy) {
+        /** Gemeinsamer Zustand dieser einen Planung (Budget, Caches); Kopien teilen ihn. */
+        final PlanContext ctx;
+        State(Map<Item, Integer> have, List<Task> tasks, List<String> steps, int pickTier, double cost, RoutePolicy policy,
+              PlanContext ctx) {
             this.have = have; this.tasks = tasks; this.steps = steps;
-            this.pickTier = pickTier; this.cost = cost; this.policy = policy;
+            this.pickTier = pickTier; this.cost = cost; this.policy = policy; this.ctx = ctx;
         }
         State copy() {
-            State copy = new State(new HashMap<>(have), new ArrayList<>(tasks), new ArrayList<>(steps), pickTier, cost, policy);
+            State copy = new State(new HashMap<>(have), new ArrayList<>(tasks), new ArrayList<>(steps), pickTier, cost, policy, ctx);
             copy.fuelLeft = fuelLeft;
             copy.sourceAware = sourceAware;
             copy.prepared = prepared;
             copy.valid = valid;
             copy.playerRequest = playerRequest;
             copy.excludedChest = excludedChest;
+            copy.destination = destination;
+            copy.destinationItem = destinationItem;
+            copy.preferredFuel = preferredFuel;
             chestTaken.forEach((pos, items) -> copy.chestTaken.put(pos, new HashMap<>(items)));
             copy.inventory = inventory == null ? null : inventory.copy();
             copy.pickUses = pickUses == null ? null : pickUses.clone();
@@ -125,13 +154,12 @@ public final class CompanionPlanner {
             ItemStack stack = e.getInventory().getItem(slot);
             if (!stack.isEmpty()) inv.merge(stack.getItem(), stack.getCount(), Integer::sum);
         }
-        State st = new State(inv, new ArrayList<>(), new ArrayList<>(), CompanionCraft.tier(e, "pickaxe"), 0, RoutePolicy.ANY);
+        State st = new State(inv, new ArrayList<>(), new ArrayList<>(), CompanionCraft.tier(e, "pickaxe"), 0, RoutePolicy.ANY,
+                new PlanContext(e, sl));
         st.prepared = st.playerRequest = true;
         st.inventory = new CompanionPrerequisites.Inventory(e, true);
         st.pickUses = CompanionPrerequisites.pickUses(e);
         st.fuelLeft = Math.max(0, e.fuelLeft);
-        budget = 20000;
-        chestCache.clear(); stations.clear(); hasTable = null; requestBoxes = null;
         Set<Item> visiting = new HashSet<>();
         visiting.add(item);
         if (!materials) {
@@ -149,7 +177,7 @@ public final class CompanionPlanner {
         State best = null;
         Map<Item, Integer> delivery = null;
         for (var recipe : CompanionRecipes.craftsFor(sl, item)) {
-            if (--budget < 0) break;
+            if (--st.ctx.budget < 0) break;
             State s = st.copy();
             Map<Item, Integer> inputs = new java.util.LinkedHashMap<>();
             int times = (count + recipe.count() - 1) / recipe.count();
@@ -161,14 +189,14 @@ public final class CompanionPlanner {
         }
         if (best == null) {
             for (var recipe : CompanionRecipes.smeltsFor(sl, item)) {
-                if (--budget < 0) break;
+                if (--st.ctx.budget < 0) break;
                 Map<Item, Integer> inputs = new java.util.LinkedHashMap<>();
                 State s = reserveIngredient(e, sl, st.copy(), recipe.input(), count, 0, visiting, inputs);
                 if (s != null && s.valid && (best == null || s.cost < best.cost)) { best = s; delivery = inputs; }
             }
         }
         for (var recipe : CompanionRecipes.processingFor(sl, item)) {
-            if (--budget < 0) break;
+            if (--st.ctx.budget < 0) break;
             State s = st.copy();
             Map<Item, Integer> inputs = new java.util.LinkedHashMap<>();
             int times = (count + recipe.count() - 1) / recipe.count();
@@ -194,7 +222,7 @@ public final class CompanionPlanner {
         }
         // Erst passende Varianten aus Kisten zusammenlegen, bevor etwas neu besorgt wird.
         for (Holder<Item> option : (Iterable<Holder<Item>>) ingredient.items()::iterator) {
-            if (amount == 0 || --budget < 0) break;
+            if (amount == 0 || --st.ctx.budget < 0) break;
             Item input = option.value();
             State taken = requestChests(e, sl, s, input, amount);
             int used = Math.min(amount, taken.count(input));
@@ -215,27 +243,62 @@ public final class CompanionPlanner {
 
     /** Eine gescheiterte Quelle nur für diese Wiederaufnahme ausschließen, samt der anderen Doppelkistenhälfte. */
     public static Plan refillRequest(CompanionEntity e, Item item, int total, BlockPos excludedSource) {
+        return refillRequest(e, item, total, excludedSource, null, null, null);
+    }
+
+    public static Plan refillHomeOrder(CompanionEntity e, Item item, int total, BlockPos home, String fuel) {
+        return refillRequest(e, item, total, null, home, item, fuel == null ? null : ItemIds.resolve(fuel));
+    }
+
+    /** If a second waiting order can use the same stop, pack both items on the first visit. */
+    public static Task bundleHomePickup(CompanionEntity mob, ServerLevel world, Plan plan,
+                                        dev.begleiter.task.TaskSpec.Request current, net.minecraft.world.Container home) {
+        if (plan.tasks().size() != 1 || !(plan.tasks().getFirst().spec() instanceof dev.begleiter.task.TaskSpec.Take first)) return null;
+        var source = mob.orderStorage(world, first.pos());
+        if (source == null) return null;
+        for (Task task : mob.peekTasks(32)) {
+            if (task == mob.currentTask()) continue;
+            if (!(task.spec() instanceof dev.begleiter.task.TaskSpec.Request next) || next.phase() != 5
+                    || !next.pos().equals(current.pos()) || next.item().equals(current.item())) return null;
+            Item item = ItemIds.resolve(next.item());
+            int missing = next.count() - home.countItem(item) - mob.getInventory().countItem(item);
+            int surplus = source.countItem(item) - mob.stockReserveAt(world, first.pos(), item);
+            if (missing <= 0 || missing > 64 || surplus < missing) return null;
+            var preview = new CompanionPrerequisites.Inventory(mob, true);
+            if (preview.addFrom(source, ItemIds.resolve(first.item()), first.count()) != 0
+                    || preview.addFrom(source, item, missing) != 0) return null;
+            return Task.take(first.pos(), next.item(), missing);
+        }
+        return null;
+    }
+
+    private static Plan refillRequest(CompanionEntity e, Item item, int total, BlockPos excludedSource,
+                                      BlockPos destination, Item destinationItem, Item preferredFuel) {
         if (!(e.level() instanceof ServerLevel sl) || total < 1 || total > (1 << 20)) return null;
         Map<Item, Integer> inv = new HashMap<>();
         for (int slot = 0; slot < e.getInventory().getContainerSize(); slot++) {
             ItemStack stack = e.getInventory().getItem(slot);
             if (!stack.isEmpty()) inv.merge(stack.getItem(), stack.getCount(), Integer::sum);
         }
-        State st = new State(inv, new ArrayList<>(), new ArrayList<>(), CompanionCraft.tier(e, "pickaxe"), 0, RoutePolicy.ANY);
+        State st = new State(inv, new ArrayList<>(), new ArrayList<>(), CompanionCraft.tier(e, "pickaxe"), 0, RoutePolicy.ANY,
+                new PlanContext(e, sl));
         st.prepared = st.playerRequest = true;
         st.inventory = new CompanionPrerequisites.Inventory(e, true);
         st.pickUses = CompanionPrerequisites.pickUses(e);
         st.fuelLeft = Math.max(0, e.fuelLeft);
-        budget = 20000;
-        chestCache.clear(); stations.clear(); hasTable = null; requestBoxes = null;
         st.excludedChest = excludedSource;
+        st.destination = destination;
+        st.destinationItem = destinationItem;
+        st.preferredFuel = preferredFuel;
         State out = produce(e, sl, st, item, total, 0, new HashSet<>());
         return out == null || !out.valid ? null : new Plan(List.copyOf(out.tasks), out.cost, List.copyOf(out.steps));
     }
 
     /** One bounded container scan per recipe request, shared by its entire dependency tree. */
     private static State requestChests(CompanionEntity e, ServerLevel sl, State st, Item item, int missing) {
-        if (requestBoxes == null) {
+        if (st.ctx.requestBoxes == null && st.destination != null && e.zones.get(CompanionZones.Kind.STORAGE, sl) == null)
+            st.ctx.requestBoxes = sl.hasChunkAt(st.destination) ? List.of(st.destination) : List.of();
+        if (st.ctx.requestBoxes == null) {
             java.util.Set<BlockPos> boxes = new java.util.LinkedHashSet<>();
             if (e.getHome() != null && sl.hasChunkAt(e.getHome())) boxes.add(e.getHome());
             for (var place : e.memory.find(CompanionMemory.Kind.CHEST, null, sl, e.blockPosition())) {
@@ -250,31 +313,34 @@ public final class CompanionPlanner {
                 if (block instanceof net.minecraft.world.level.block.ChestBlock || block instanceof net.minecraft.world.level.block.BarrelBlock)
                     boxes.add(pos.immutable());
             }
-            requestBoxes = boxes.stream().sorted(java.util.Comparator.comparingDouble(p -> p.distSqr(center))).toList();
+            st.ctx.requestBoxes = boxes.stream().sorted(java.util.Comparator.comparingDouble(p ->
+                    p.distSqr(center) * e.routes.sourcePreference(sl, p))).toList();
         }
         State s = st.copy();
         int left = missing;
         // Eine Doppelkiste ist eine Quelle, auch wenn sie über beide Blockentities gefunden wurde.
         java.util.Set<BlockPos> visited = new HashSet<>();
-        for (BlockPos pos : requestBoxes) {
+        for (BlockPos pos : st.ctx.requestBoxes) {
             if (left <= 0) break;
-            if (!visited.add(pos) || e.memory.dangerous(sl, pos, 8)) continue;
-            if (pos.equals(st.excludedChest)) continue;
+            if (!visited.add(pos) || e.memory.dangerous(sl, pos, 8) || st.destination != null && e.gatherMissed(sl, pos)) continue;
+            if (pos.equals(st.excludedChest) || item == st.destinationItem && pos.equals(st.destination)) continue;
             var state = sl.getBlockState(pos);
             BlockPos key = pos;
             if (state.getBlock() instanceof net.minecraft.world.level.block.ChestBlock
                     && state.getValue(net.minecraft.world.level.block.ChestBlock.TYPE) != net.minecraft.world.level.block.state.properties.ChestType.SINGLE) {
                 BlockPos other = pos.relative(net.minecraft.world.level.block.ChestBlock.getConnectedDirection(state));
                 visited.add(other);
-                if (other.equals(st.excludedChest)) continue;
+                if (other.equals(st.excludedChest) || item == st.destinationItem && other.equals(st.destination)) continue;
+                if (st.destination != null && e.gatherMissed(sl, other)) continue;
                 if (other.asLong() < key.asLong()) key = other;
             }
-            var contents = e.containerAt(sl, pos);
+            var contents = st.destination == null ? e.containerAt(sl, pos) : e.orderStorage(sl, pos);
             if (contents == null) continue;
             int available = 0;
             for (int slot = 0; slot < contents.getContainerSize(); slot++)
                 if (contents.getItem(slot).is(item)) available += contents.getItem(slot).getCount();
             available -= s.chestTaken.getOrDefault(key, Map.of()).getOrDefault(item, 0);
+            available -= e.stockReserveAt(sl, pos, item);
             int take = Math.min(left, Math.max(0, available));
             if (take == 0) continue;
             if (!s.inventory.add(new ItemStack(item, take))) { s.valid = false; return s; }
@@ -313,7 +379,8 @@ public final class CompanionPlanner {
         }
         ItemStack hand = e.getMainHandItem();
         if (!prepared && !hand.isEmpty()) inv.merge(canon(hand.getItem()), hand.getCount(), Integer::sum);
-        State st = new State(inv, new ArrayList<>(), new ArrayList<>(), CompanionCraft.tier(e, "pickaxe"), 0, policy);
+        State st = new State(inv, new ArrayList<>(), new ArrayList<>(), CompanionCraft.tier(e, "pickaxe"), 0, policy,
+                new PlanContext(e, sl));
         st.fuelLeft = Math.max(0, e.fuelLeft);
         st.sourceAware = sourceAware;
         st.prepared = prepared;
@@ -321,10 +388,6 @@ public final class CompanionPlanner {
             st.inventory = new CompanionPrerequisites.Inventory(e);
             st.pickUses = CompanionPrerequisites.pickUses(e);
         }
-        budget = 20000;
-        chestCache.clear();
-        hasTable = null;
-        stations.clear();
         long t0 = System.nanoTime();
         // Was er schon hat, zählt mit: count = Gesamtbestand
         Item c = canon(item);
@@ -332,7 +395,7 @@ public final class CompanionPlanner {
         if (need <= 0) return new Plan(List.of(), 0, List.of("already there"));
         State out = produce(e, sl, st, c, count, 0, new HashSet<>());
         e.consoleDebug("Goal planner " + id(c) + " x" + need + ": " + (out == null ? "no route" : out.steps.size() + " steps")
-                + ", " + (20000 - budget) + " nodes, " + (System.nanoTime() - t0) / 1_000_000 + " ms");
+                + ", " + (BUDGET - st.ctx.budget) + " nodes, " + (System.nanoTime() - t0) / 1_000_000 + " ms");
         if (out == null) return null;
         return new Plan(out.tasks, out.cost, out.steps);
     }
@@ -361,7 +424,7 @@ public final class CompanionPlanner {
     private static State produce(CompanionEntity e, ServerLevel sl, State st, Item item, int need, int depth, Set<Item> visiting) {
         int missing = need - st.count(item);
         if (missing <= 0) return st.copy();
-        if (depth > MAX_DEPTH || --budget < 0 || !visiting.add(item)) return null;
+        if (depth > MAX_DEPTH || --st.ctx.budget < 0 || !visiting.add(item)) return null;
         try {
             if (st.playerRequest) {
                 st = requestChests(e, sl, st, item, missing);
@@ -393,12 +456,12 @@ public final class CompanionPlanner {
         // Unknown chest tool durability cannot count as a fresh crafted tool.
         if (st.prepared && CompanionPrerequisites.pickTier(item) > 0) return null;
         Item real = item;
-        BlockPos box = chestCache.computeIfAbsent(real, k -> java.util.Optional.ofNullable(st.sourceAware
-                ? e.findContainerWith(k, 16, p -> CompanionSources.allowed(e, k, p))
-                : e.findContainerWith(k, 16))).orElse(null);
+        BlockPos box = st.ctx.chestCache.computeIfAbsent(real, k -> java.util.Optional.ofNullable(st.sourceAware
+                ? e.findContainerWith(k, st.ctx.nearbyContainers(), p -> CompanionSources.allowed(e, k, p))
+                : e.findContainerWith(k, st.ctx.nearbyContainers(), p -> true))).orElse(null);
         if (box == null) return null;
         CompanionMemory.Place known = e.memory.chestWith(real, sl, box, 1);
-        int avail = known == null ? missing : known.itemCount(real);
+        int avail = (known == null ? missing : known.itemCount(real)) - e.stockReserveAt(sl, box, real);
         if (avail < missing) return null; // Teilmengen: lieber anders komplett
         State s = st.copy();
         s.tasks.add(Task.take(box, id(real), missing));
@@ -437,7 +500,7 @@ public final class CompanionPlanner {
                 ItemStack stack = container.getItem(slot);
                 if (stack.is(item)) available += stack.getCount();
             }
-            int take = Math.min(left, available);
+            int take = Math.min(left, Math.max(0, available - e.stockReserveAt(sl, pos, item)));
             if (take == 0) continue;
             // Eine gescheiterte Inventarsimulation kann schon Teilstapel eingefügt haben.
             // Jede Kiste auf einer Kopie bewerten, damit verworfene Quellen den Plan nicht verfälschen.
@@ -619,32 +682,46 @@ public final class CompanionPlanner {
         State s = st.copy();
         Map<Item, Integer> consumed = new HashMap<>();
         for (int i = 0; i < amount; i++) {
+            if (s.fuelLeft < 1 && s.preferredFuel != null && s.count(s.preferredFuel) == 0) {
+                State preferred = requestChests(e, sl, s, s.preferredFuel, 1);
+                if (preferred.valid) s = preferred;
+            }
+            Item coal = coalFuel(s, consumed);
             Item wood = woodFuel(s, consumed);
-            if (s.fuelLeft < 1 && s.count(Items.COAL) == 0
-                    && wood == null) {
+            if (s.fuelLeft < 1 && coal == null && wood == null) {
                 State f = produce(e, sl, s, Items.COAL, 1, depth + 1, visiting);
                 if (f == null) f = produce(e, sl, s, Items.OAK_PLANKS, 1, depth + 1, visiting);
                 if (f == null) return null;
                 s = f;
+                coal = coalFuel(s, consumed);
                 wood = woodFuel(s, consumed);
             }
             if (s.fuelLeft < 1) {
-                Item fuel = s.count(Items.COAL) > 0 ? Items.COAL : wood;
+                Item fuel = coal == null ? wood : coal;
+                if (fuel == null) return null;
                 if (s.prepared) {
                     // Die Ausführung verbrennt zuerst Kohle, auch wenn ein äußeres Rezept sie reserviert hat.
                     // Widersprüchliche Reservierungen ablehnen, statt darauf zu setzen, dass sie übersprungen werden.
-                    fuel = s.inventory.count(Items.COAL) > consumed.getOrDefault(Items.COAL, 0) ? Items.COAL
-                            : wood;
-                    if (fuel == null || s.count(fuel) <= 0) return null;
+                    if (s.count(fuel) <= 0) return null;
                 }
                 s.add(fuel, -1);
                 consumed.merge(fuel, 1, Integer::sum);
-                s.fuelLeft += fuel == Items.COAL ? 8 : 1.5;
+                s.fuelLeft += fuel == Items.COAL || fuel == Items.CHARCOAL ? 8 : 1.5;
             }
             s.fuelLeft -= 1;
         }
         for (var fuel : consumed.entrySet()) s.consume(fuel.getKey(), fuel.getValue());
         return s;
+    }
+
+    private static Item coalFuel(State state, Map<Item, Integer> consumed) {
+        if (state.preferredFuel != null && fuelCount(state, state.preferredFuel, consumed) > 0) return state.preferredFuel;
+        if (fuelCount(state, Items.COAL, consumed) > 0) return Items.COAL;
+        return fuelCount(state, Items.CHARCOAL, consumed) > 0 ? Items.CHARCOAL : null;
+    }
+
+    private static int fuelCount(State state, Item item, Map<Item, Integer> consumed) {
+        return state.prepared ? state.inventory.count(item) - consumed.getOrDefault(item, 0) : state.count(item);
     }
 
     private static Item woodFuel(State s, Map<Item, Integer> consumed) {
@@ -661,7 +738,7 @@ public final class CompanionPlanner {
         State best = null;
         int tried = 0;
         for (CompanionRecipes.Craft c : CompanionRecipes.craftsFor(sl, item)) {
-            if (++tried > 4 && !st.playerRequest || budget <= 0) break;
+            if (++tried > 4 && !st.playerRequest || st.ctx.budget <= 0) break;
             int times = (missing + c.count() - 1) / c.count();
             State s = st.copy();
             if (s.prepared && c.needsTable()) {
@@ -698,8 +775,8 @@ public final class CompanionPlanner {
             s.tasks.add(Task.craft(id(item), missing));
             s.steps.add(c.count() * times + "x " + id(item) + " craft");
             s.add(item, c.count() * times);
-            if (!s.prepared && c.needsTable() && hasTable == null) hasTable = e.findStation("crafting_table", 24) != null;
-            s.cost += 2 + (!s.prepared && c.needsTable() && !hasTable ? 6 : 0);
+            if (!s.prepared && c.needsTable() && st.ctx.hasTable == null) st.ctx.hasTable = e.findStation("crafting_table", 24) != null;
+            s.cost += 2 + (!s.prepared && c.needsTable() && !st.ctx.hasTable ? 6 : 0);
             if (s.valid && (best == null || s.cost < best.cost)) best = s;
         }
         return best;
@@ -709,7 +786,7 @@ public final class CompanionPlanner {
         if (!st.playerRequest || missing > CompanionRecipes.MAX_PROCESSING_BATCH) return null;
         State best = null;
         for (var recipe : CompanionRecipes.processingFor(sl, item)) {
-            if (--budget < 0) break;
+            if (--st.ctx.budget < 0) break;
             State s = station(e, sl, st.copy(), CompanionCraft.item(recipe.station()), depth, visiting);
             if (s == null) continue;
             int times = (missing + recipe.count() - 1) / recipe.count();
@@ -731,7 +808,7 @@ public final class CompanionPlanner {
 
     private static State station(CompanionEntity e, ServerLevel sl, State st, Item item, int depth, Set<Item> visiting) {
         if (st.installed.contains(item)) return st.copy();
-        if (stations.computeIfAbsent(item, k -> e.findStation(id(k), 24) != null)) {
+        if (st.ctx.stations.computeIfAbsent(item, k -> (st.playerRequest ? e.findOrderStation(id(k), 24) : e.findStation(id(k), 24)) != null)) {
             State s = st.copy();
             s.installed.add(item);
             return s;
@@ -758,7 +835,7 @@ public final class CompanionPlanner {
         Item best = null;
         double bc = IMPOSSIBLE;
         for (int i = 0; i < (st.playerRequest ? options.size() : Math.min(3, options.size())); i++) {
-            if (budget <= 0) break;
+            if (st.ctx.budget <= 0) break;
             Item o = options.get(i);
             if (visiting.contains(o)) continue;
             State s = produce(e, sl, st, o, amount, depth + 1, visiting);

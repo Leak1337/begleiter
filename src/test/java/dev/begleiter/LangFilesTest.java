@@ -174,7 +174,7 @@ class LangFilesTest {
     void jederSchluesselWirdBenutzt() throws IOException {
         String code = sources(MAIN) + sources(CLIENT);
         Set<String> strings = new TreeSet<>();
-        Matcher s = Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"").matcher(code);
+        Matcher s = Pattern.compile("\"([^\"\\\\]*+(?:\\\\.[^\"\\\\]*+)*+)\"").matcher(code);
         while (s.find()) strings.add(s.group(1));
         Set<String> prefixes = new TreeSet<>();
         Matcher p = Pattern.compile("\"([a-z0-9_.]+\\.)\"\\s*\\+").matcher(code);
@@ -199,7 +199,8 @@ class LangFilesTest {
             "\"[^\"\\\\]*([äöüÄÖÜß]|\\b(ich|der|die|das|und|nicht|kein|mein|dein)\\b)[^\"\\\\]*\"");
     /** Testarena und Testkarten: nur für Operatoren, bewusst nicht übersetzt. */
     private static final Set<String> GERMAN_FILES = Set.of("LexiconDe.java", "ItemRequest.java", "TestScenarios.java", "TestMap.java",
-            "TestMachineScenarios.java", "TestRedstoneScenarios.java", "TestMapExpansion.java", "ParkourCourse.java");
+            "TestMachineScenarios.java", "TestRedstoneScenarios.java", "TestMapExpansion.java", "ParkourCourse.java",
+            "SelfPlayRun.java"); // Entwickler-Protokoll des Selbstspiel-Laufs, nie im Spiel sichtbar
     /** Eingabeseite: Umlaut-Normalisierung, deutsche Füllwörter der Erkennung, Einordnung alter Log-Einträge. */
     private static final List<String> GERMAN_LINES = List.of(
             "chat/ChatText.java: return text.replace(\"ä\", \"ae\")",
@@ -240,7 +241,7 @@ class LangFilesTest {
         try (Stream<Path> files = Files.walk(MAIN)) {
             for (Path file : files.filter(f -> f.toString().endsWith(".java")).sorted().toList()) {
                 if (GERMAN_FILES.contains(file.getFileName().toString())) continue;
-                Matcher m = Pattern.compile("Component\\.literal\\(\"((?:[^\"\\\\]|\\\\.)*)\"\\s*[)+]")
+                Matcher m = Pattern.compile("Component\\.literal\\(\"([^\"\\\\]*+(?:\\\\.[^\"\\\\]*+)*+)\"\\s*[)+]")
                         .matcher(Files.readString(file, StandardCharsets.UTF_8));
                 while (m.find()) if (!allowed.contains(m.group(1))) found.add(file.getFileName() + ": \"" + m.group(1) + "\"");
             }

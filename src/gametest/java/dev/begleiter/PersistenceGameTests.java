@@ -35,6 +35,7 @@ public class PersistenceGameTests {
         CompoundTag data = save(h, c);
         data.putInt("Hunger", hunger);
         data.putInt("HungerTimer", timer);
+        data.putFloat("Saturation", 0f); // ohne Sättigung zählt der nächste Abzug direkt am Hunger
         load(h, c, data);
         return c;
     }
@@ -169,7 +170,7 @@ public class PersistenceGameTests {
         CompanionEntity original = withHunger(h, 7, 23);
         CompanionEntity restored = companion(h);
         load(h, restored, save(h, original));
-        h.assertValueEqual(restored.hunger, 7, "Hunger nach Laden");
+        h.assertValueEqual(restored.food.level(), 7, "Hunger nach Laden");
         h.assertValueEqual(save(h, restored).getIntOr("HungerTimer", -1), 23, "Timer nach Laden");
         h.succeed();
     }
@@ -181,7 +182,7 @@ public class PersistenceGameTests {
         legacy.remove("HungerTimer");
         CompanionEntity restored = withHunger(h, 2, 17);
         load(h, restored, legacy);
-        h.assertValueEqual(restored.hunger, 20, "Legacy-Hunger");
+        h.assertValueEqual(restored.food.level(), 20, "Legacy-Hunger");
         h.assertValueEqual(save(h, restored).getIntOr("HungerTimer", -1), 0, "Legacy-Timer");
         h.succeed();
     }
@@ -189,7 +190,7 @@ public class PersistenceGameTests {
     @GameTest
     public void negativeHungerwerteWerdenBegrenzt(GameTestHelper h) {
         CompanionEntity restored = withHunger(h, Integer.MIN_VALUE, Integer.MIN_VALUE);
-        h.assertValueEqual(restored.hunger, 0, "Negativer Hunger");
+        h.assertValueEqual(restored.food.level(), 0, "Negativer Hunger");
         h.assertValueEqual(save(h, restored).getIntOr("HungerTimer", -1), 0, "Negativer Timer");
         h.succeed();
     }
@@ -197,7 +198,7 @@ public class PersistenceGameTests {
     @GameTest
     public void zuGrosseHungerwerteWerdenBegrenzt(GameTestHelper h) {
         CompanionEntity restored = withHunger(h, Integer.MAX_VALUE, Integer.MAX_VALUE);
-        h.assertValueEqual(restored.hunger, 20, "Zu großer Hunger");
+        h.assertValueEqual(restored.food.level(), 20, "Zu großer Hunger");
         h.assertValueEqual(save(h, restored).getIntOr("HungerTimer", -1), 29, "Zu großer Timer");
         h.succeed();
     }
@@ -209,7 +210,7 @@ public class PersistenceGameTests {
         data.putString("HungerTimer", "kaputt");
         CompanionEntity restored = withHunger(h, 1, 9);
         load(h, restored, data);
-        h.assertValueEqual(restored.hunger, 20, "Ungültiger Hunger-Typ");
+        h.assertValueEqual(restored.food.level(), 20, "Ungültiger Hunger-Typ");
         h.assertValueEqual(save(h, restored).getIntOr("HungerTimer", -1), 0, "Ungültiger Timer-Typ");
         h.succeed();
     }
@@ -221,7 +222,7 @@ public class PersistenceGameTests {
         load(h, restored, save(h, original));
         restored.tickCount = 20;
         restored.customServerAiStep(h.getLevel());
-        h.assertValueEqual(restored.hunger, 6, "Hunger-Countdown wurde beim Laden zurückgesetzt");
+        h.assertValueEqual(restored.food.level(), 6, "Hunger-Countdown wurde beim Laden zurückgesetzt");
         h.assertValueEqual(save(h, restored).getIntOr("HungerTimer", -1), 0, "Timer nach Hungerabzug");
         h.succeed();
     }
@@ -233,7 +234,7 @@ public class PersistenceGameTests {
         h.assertTrue(!memory.contains("Hunger") && !memory.contains("HungerTimer"), "Hunger gelangt in den Erinnerungskern");
         CompanionEntity revived = withHunger(h, 1, 29);
         revived.loadMemory(memory);
-        h.assertValueEqual(revived.hunger, 20, "Kern-Wiederbelebung ist nicht satt");
+        h.assertValueEqual(revived.food.level(), 20, "Kern-Wiederbelebung ist nicht satt");
         h.assertValueEqual(save(h, revived).getIntOr("HungerTimer", -1), 0, "Kern übernimmt alten Timer");
         h.succeed();
     }

@@ -33,7 +33,7 @@ public class LongTermGameTests {
         c.stay();
         c.getInventory().clearContent();
         c.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
-        c.hunger = 20;
+        c.food.set(20);
         c.giveToInventory(new ItemStack(Items.DIAMOND_PICKAXE));
         c.giveToInventory(new ItemStack(Items.DIAMOND_AXE));
         c.memory.clear();

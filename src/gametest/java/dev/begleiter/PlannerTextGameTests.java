@@ -19,7 +19,7 @@ import net.minecraft.world.item.Items;
 public class PlannerTextGameTests {
     private static CompanionEntity companion(GameTestHelper h) {
         var c = h.spawn(CompanionMod.COMPANION, new BlockPos(2, 1, 2));
-        c.stay(); c.setNoAi(true); c.hunger = 20; return c;
+        c.stay(); c.setNoAi(true); c.food.set(20); return c;
     }
 
     private static ServerPlayer owner(GameTestHelper h, CompanionEntity c, boolean op) {
@@ -51,7 +51,7 @@ public class PlannerTextGameTests {
 
     @GameTest
     public void reasonComponentsKeepUrgencyAndSelectedTasks(GameTestHelper h) throws Exception {
-        var c = companion(h); c.hunger = 4;
+        var c = companion(h); c.food.set(4);
         var hunger = CompanionNeeds.score(c, Need.HUNGER);
         h.assertTrue(hunger != null && hunger.need() == Need.HUNGER && hunger.value() == 87, "Hunger urgency changed");
         translated(h, hunger.reasonText(), "Hunger 4/20, nur 0", "hunger 4/20, carrying only 0");
@@ -79,7 +79,8 @@ public class PlannerTextGameTests {
         h.assertTrue(reason.getArgs()[0] instanceof Component item && item.getContents() instanceof TranslatableContents, "Native tool name flattened");
         h.assertTrue(CompanionNeeds.act(c, score), "Worn-tool replacement not planned");
         c.goal = score.need(); c.goalScore = score.value(); c.setGoalReason(score.reasonText());
-        h.assertTrue(c.isStage("planner.stage.replace_worn") && c.taskCount() == 2, "Replacement stage/queue changed");
+        // Steine, Holz für die Stiele (keine Stöcke, Bretter oder Stämme im Inventar) und das Werkzeug selbst
+        h.assertTrue(c.isStage("planner.stage.replace_worn") && c.taskCount() == 3, "Replacement stage/queue changed");
         var buffer = new RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(), h.getLevel().registryAccess());
         CompanionSnapshot panel;
         try {
@@ -131,7 +132,7 @@ public class PlannerTextGameTests {
 
     @GameTest
     public void explainChatIsReadOnlyAndInterruptStillProtectsPlayerOrders(GameTestHelper h) throws Exception {
-        var c = companion(h); var p = owner(h, c, false); c.hunger = 4;
+        var c = companion(h); var p = owner(h, c, false); c.food.set(4);
         c.goal = Need.SUPPLY; c.goalScore = 20; c.setGoalReason(CompanionTexts.tr("planner.reason.wood", 0));
         c.addTask(CompanionEntity.Task.gather("holz", 3)); var before = c.peekTasks(10);
         var reply = CompanionChatActions.interpretReply(p, c, "why are you doing that", "en_us");

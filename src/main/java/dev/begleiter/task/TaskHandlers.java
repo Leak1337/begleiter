@@ -28,6 +28,7 @@ public final class TaskHandlers {
         FACTORIES.put(TaskType.SMELT, SmeltHandler::new);
         FACTORIES.put(TaskType.STATION, StationHandler::new);
         FACTORIES.put(TaskType.REPAIR, RepairHandler::new);
+        FACTORIES.put(TaskType.BREW, BrewHandler::new);
         FACTORIES.put(TaskType.GEARUP, GearUpHandler::new);
         FACTORIES.put(TaskType.DOOR, DoorHandler::new);
         // Ressourcen
@@ -43,6 +44,7 @@ public final class TaskHandlers {
         FACTORIES.put(TaskType.FIGHT, FightHandler::new);
         FACTORIES.put(TaskType.CRYSTALS, CrystalsHandler::new);
         FACTORIES.put(TaskType.BREED, BreedHandler::new);
+        FACTORIES.put(TaskType.FISH, FishHandler::new);
         FACTORIES.put(TaskType.FARM, FarmHandler::new);
         FACTORIES.put(TaskType.TRADE, TradeHandler::new);
         // Projekte

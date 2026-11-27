@@ -253,7 +253,8 @@ public class FarmPlacementGameTests {
     @GameTest(maxTicks = 3000, structure = ARENA)
     public void kaninchenstallWirdMitSurvivalMaterialGebaut(GameTestHelper h) { RedstoneScenarioGameTests.run(h, "farm_kaninchenfarm"); }
 
-    @GameTest(maxTicks = 3000, structure = ARENA)
+    // 648 Blöcke im Survival-Bau, ~100 Blöcke je 300 Ticks: 3000 Ticks waren ohne Puffer (einzeln/unter Last zu knapp)
+    @GameTest(maxTicks = 4800, structure = ARENA)
     public void melonenhausWirdMitSurvivalMaterialGebaut(GameTestHelper h) { RedstoneScenarioGameTests.run(h, "farm_melonenfarm"); }
 
     @GameTest(maxTicks = 3000, structure = ARENA)

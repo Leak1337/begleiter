@@ -185,7 +185,7 @@ public class QueueRegistryIdGameTests {
         h.assertValueEqual(c.findStation("crafting_table", 4), table, "Alter Stations-Alias");
         c.giveToInventory(new ItemStack(Items.OAK_PLANKS, 4));
         h.assertTrue(c.canCarryStation("minecraft:crafting_table"), "Kanonische Werkbank nicht als tragbar erkannt");
-        h.assertTrue(!CompanionEntity.isBlockIdPublic(Blocks.FURNACE.defaultBlockState(), "begleiter-test:furnace"),
+        h.assertTrue(!CompanionStations.isBlockId(Blocks.FURNACE.defaultBlockState(), "begleiter-test:furnace"),
                 "Fremder Namensraum trifft Vanilla-Ofen");
         h.succeed();
     }

@@ -268,18 +268,26 @@ public class ChatAdapterGameTests {
             var entry = new CompoundTag(); entry.put("pos", ints(x, 0, 0)); entry.putInt("state", x); blocks.add(entry);
         }
         data.put("blocks", blocks);
-        try {
-            NbtIo.writeCompressed(data, file);
-            say(p, "Bau " + name + " mit Luft gedreht 90");
-            h.assertTrue(c.build != null && c.build.total() == 2, "DE schematic/air lost");
-            var expected = c.build.order;
-            c.cancelOrders();
-            say(p, "build " + name + " with air rotated 90");
-            h.assertTrue(c.build != null && c.build.order.equals(expected), "EN schematic/air/rotation differs");
-            c.cancelOrders();
-            say(p, "build " + name);
-            h.assertTrue(c.build != null && c.build.total() == 1, "Schematic without air clears blocks");
-        } finally { Files.deleteIfExists(file); }
-        h.succeed();
+        // Schematics werden im Hintergrund gelesen: nach jedem Auftrag auf den Bau warten
+        NbtIo.writeCompressed(data, file);
+        var expected = new java.util.concurrent.atomic.AtomicReference<java.util.List<CompanionBuilder.Placement>>();
+        say(p, "Bau " + name + " mit Luft gedreht 90");
+        h.startSequence()
+                .thenWaitUntil(() -> h.assertTrue(c.build != null && c.build.total() == 2, "DE schematic/air lost"))
+                .thenExecute(() -> {
+                    expected.set(c.build.order);
+                    c.cancelOrders();
+                    say(p, "build " + name + " with air rotated 90");
+                })
+                .thenWaitUntil(() -> h.assertTrue(c.build != null && c.build.order.equals(expected.get()), "EN schematic/air/rotation differs"))
+                .thenExecute(() -> {
+                    c.cancelOrders();
+                    say(p, "build " + name);
+                })
+                .thenWaitUntil(() -> h.assertTrue(c.build != null && c.build.total() == 1, "Schematic without air clears blocks"))
+                .thenExecute(() -> {
+                    try { Files.deleteIfExists(file); } catch (java.io.IOException ignored) { }
+                })
+                .thenSucceed();
     }
 }

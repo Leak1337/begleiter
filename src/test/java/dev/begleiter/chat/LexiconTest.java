@@ -37,6 +37,7 @@ class LexiconTest {
             "Bau eine Farm|build a farm|BUILD_SCHEMATIC",
             "Ernte das Feld|harvest the field|FARM",
             "Züchte Kühe|breed cows|BREED",
+            "Geh angeln|go fishing|FISH",
             "Reparier dein Werkzeug|repair your tools|REPAIR",
             "Kauf mir ein Buch|buy me a book|TRADE",
             "Verkauf dein Zeug|sell your stuff|TRADE",

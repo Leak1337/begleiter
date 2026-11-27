@@ -1,5 +1,6 @@
 package dev.begleiter.task;
 
+import dev.begleiter.world.SafeLevel;
 import dev.begleiter.CompanionTexts;
 import net.minecraft.network.chat.Component;
 import dev.begleiter.debug.BotDebug.EventKind;
@@ -43,23 +44,23 @@ final class StrongholdHandler implements TaskHandler {
         if (task.tries() >= 60) return fail(ctx, CompanionTexts.tr("handler.stronghold.unreachable"));
         if (mob.endRoomPos == null) {
             if (mob.findItem(Items.ENDER_EYE) < 0) return fail(ctx, CompanionTexts.tr("handler.stronghold.no_eyes"));
-            BlockPos room = mob.locateEndRoom();
+            BlockPos room = mob.expedition.locateEndRoom();
             if (room == null) return fail(ctx, CompanionTexts.tr("handler.stronghold.not_found"));
             mob.endRoomPos = room;
-            mob.throwEye(room);
+            mob.expedition.throwEye(room);
             mob.tell(CompanionTexts.tr("handler.stronghold.located", room.getX(), room.getZ()));
             mob.replaceCurrent(List.of(Task.travel(room), Task.stronghold()));
             return Status.REPLACED;
         }
 
-        List<BlockPos> frames = mob.portalFrames(16);
+        List<BlockPos> frames = mob.expedition.portalFrames(16);
         if (!frames.isEmpty()) {
             List<BlockPos> empty = new ArrayList<>();
-            for (BlockPos f : frames) if (!CompanionEntity.frameHasEye(sl, f)) empty.add(f);
+            for (BlockPos f : frames) if (!dev.begleiter.CompanionExpedition.frameHasEye(sl, f)) empty.add(f);
             if (empty.isEmpty()) {
                 BlockPos portal = null;
                 for (BlockPos p : BlockPos.betweenClosed(frames.getFirst().offset(-4, -1, -4), frames.getFirst().offset(4, 1, 4)))
-                    if (sl.getBlockState(p).is(Blocks.END_PORTAL)) { portal = p.immutable(); break; }
+                    if (SafeLevel.is(sl, p, Blocks.END_PORTAL)) { portal = p.immutable(); break; }
                 if (portal == null) return fail(ctx, CompanionTexts.tr("handler.stronghold.no_portal"));
                 mob.endPortalPos = portal;
                 mob.tell(CompanionTexts.tr("handler.stronghold.open", portal.toShortString()));
@@ -70,7 +71,7 @@ final class StrongholdHandler implements TaskHandler {
             BlockPos f = empty.getFirst();
             if (!ctx.approach(f, REACH_SQR)) return Status.RUNNING;
             mob.getLookControl().setLookAt(Vec3.atCenterOf(f));
-            if (++progress % 10 == 0) mob.placeEye(sl, f); // kurz zwischen den Augen warten
+            if (++progress % 10 == 0) mob.expedition.placeEye(sl, f); // kurz zwischen den Augen warten
             return Status.RUNNING;
         }
 
@@ -81,7 +82,7 @@ final class StrongholdHandler implements TaskHandler {
             next.add(Task.travel(room));
         } else if (mob.blockPosition().getY() > room.getY() + 2) {
             if (mob.mineDir == null) mob.mineDir = mob.getDirection();
-            List<Task> stairs = mob.staircase(Math.min(8, mob.blockPosition().getY() - room.getY()), mob.mineDir);
+            List<Task> stairs = mob.gathering.staircase(Math.min(8, mob.blockPosition().getY() - room.getY()), mob.mineDir);
             if (stairs.isEmpty()) mob.mineDir = mob.mineDir.getClockWise();
             next.addAll(stairs);
         } else {

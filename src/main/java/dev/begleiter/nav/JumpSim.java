@@ -34,10 +34,32 @@ public final class JumpSim {
     private static final double[] TAKEOFF = {0.3, 0.45, 0};
     private static final double EPS = 1e-7;
 
-    /** Warum der letzte {@link #plan} null war (Debug, nur Server-Thread). */
-    public static String lastReject = "";
+    interface Rejection {
+        String text();
+    }
+    private record LandingMiss(boolean sprint, boolean landed, double x, double y, double z,
+                               boolean bumped, boolean unclear, boolean hazard) implements Rejection {
+        @Override public String text() {
+            return String.format(java.util.Locale.ROOT, "%s: lands %s at %.2f %.2f %.2f%s%s%s",
+                    sprint ? "sprint" : "walk", landed ? "" : "not", x, y, z, bumped ? " (bumps)" : "",
+                    unclear ? " (unclear)" : "", hazard ? " (hazard)" : "");
+        }
+    }
+    private record LandingMargin(double margin) implements Rejection {
+        @Override public String text() { return String.format(java.util.Locale.ROOT, "margin %.2f / landing area", margin); }
+    }
+    private record Message(String text) implements Rejection {}
+    private static final Message NONE_REJECTION = new Message("");
+    private static final Message UNSAFE_MISS = new Message("deadly or unsecured miss path");
+    private static final Message NO_FOLLOW_UP = new Message("no safe follow-up step");
+    private static final ThreadLocal<Rejection> lastReject = ThreadLocal.withInitial(() -> NONE_REJECTION);
+    /** Format numbers only when a caller asks for the diagnostic. */
+    public static String lastRejection() { return lastReject.get().text(); }
+    private static void reject(NavContext context, Rejection rejection) {
+        lastReject.set(context.blocks.optimizedReads() ? rejection : new Message(rejection.text()));
+    }
     record Key(long from, long to, boolean allowPlace) {}
-    record Cached(Plan plan, String rejection) {}
+    record Cached(Plan plan, Rejection rejection) {}
     static final int CACHE_LIMIT = 2048;
 
     public enum Profile {
@@ -303,7 +325,7 @@ public final class JumpSim {
         Cached cached = c.jumpPlans.get(key);
         if (cached != null) {
             c.jumpCacheHits++;
-            lastReject = cached.rejection();
+            lastReject.set(cached.rejection());
             return cached.plan();
         }
         if (clock != null && clock.getAsLong() - started >= budget) {
@@ -313,7 +335,7 @@ public final class JumpSim {
         c.jumpCacheMisses++;
         Plan plan = plan(c, sx, sy, sz, tx, ty, tz, Double.NaN, Double.NaN, 0);
         if (c.jumpPlans.size() >= CACHE_LIMIT) c.jumpPlans.clear();
-        c.jumpPlans.put(key, new Cached(plan, lastReject));
+        c.jumpPlans.put(key, new Cached(plan, lastReject.get()));
         return plan;
     }
 
@@ -322,7 +344,7 @@ public final class JumpSim {
      * (Ausführung, neu prüfen): Anlauf-Tempo höchstens vCap (was er tatsächlich an Schwung hat).
      */
     public static Plan plan(NavContext c, int sx, int sy, int sz, int tx, int ty, int tz, double fromX, double fromZ, double vCap) {
-        lastReject = "";
+        lastReject.set(NONE_REJECTION);
         Body body = c.body;
         double ddx = tx - sx, ddz = tz - sz, len = Math.sqrt(ddx * ddx + ddz * ddz);
         if (len < 1e-6) return null;
@@ -369,16 +391,14 @@ public final class JumpSim {
                     fly(c.blocks, body, ox, fy, oz, dirX, dirZ, v, sprint, f);
                 else c.blocks.reusedFlights++;
                 if (!onTarget(f, tx, ty, tz)) {
-                    lastReject = String.format(java.util.Locale.ROOT, "%s: lands %s at %.2f %.2f %.2f%s%s%s",
-                            sprint ? "sprint" : "walk", f.landed ? "" : "not", f.x, f.y, f.z, f.bumped ? " (bumps)" : "",
-                            f.unclear ? " (unclear)" : "", f.hazard ? " (hazard)" : "");
+                    reject(c, new LandingMiss(sprint, f.landed, f.x, f.y, f.z, f.bumped, f.unclear, f.hazard));
                     continue;
                 }
                 double m = margin(f, tx, tz);
                 int fall = (int) Math.ceil(f.peak - f.y - 1e-3);
                 if (c.health - c.fallDamage(fall) < NavContext.MIN_HEALTH_AFTER_FALL) continue;
                 if (m < MIN_MARGIN || !landingClear(c, f, body)) {
-                    lastReject = String.format(java.util.Locale.ROOT, "margin %.2f / landing area", m);
+                    reject(c, new LandingMargin(m));
                     continue;
                 }
                 if (best != null && m <= best.margin + 0.02) continue;
@@ -399,7 +419,7 @@ public final class JumpSim {
                 candidate.reach = Math.sqrt((f.x - ox) * (f.x - ox) + (f.z - oz) * (f.z - oz));
                 misses(c, candidate, sy);
                 if (candidate.deadlyMisses > 0 || candidate.unsafeMisses >= 3) {
-                    lastReject = "deadly or unsecured miss path";
+                    lastReject.set(UNSAFE_MISS);
                     continue;
                 }
                 candidate.cost = cost(c, candidate, sy - ty);
@@ -410,7 +430,7 @@ public final class JumpSim {
         }
         if (best == null) return null;
         if (!hasFollowUp(c, tx, ty, tz)) {
-            lastReject = "no safe follow-up step";
+            lastReject.set(NO_FOLLOW_UP);
             return null;
         }
         int gap = (int) Math.round(len) - 1;

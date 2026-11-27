@@ -133,6 +133,8 @@ final class TestSchematics {
     private static Path file(String name) throws IOException {
         Path dir = CompanionSchematics.folders().getFirst();
         Files.createDirectories(dir);
+        // Die gleich geschriebene Datei soll sofort im Bauplan-Katalog stehen, nicht erst nach Ablauf des Listen-Caches
+        CompanionSchematics.forgetList();
         return dir.resolve(name);
     }
 

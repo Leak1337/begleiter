@@ -44,18 +44,18 @@ final class PortalHandler implements TaskHandler {
         BlockPos site = portal.pos();
         if (site == null) {
             BlockPos home = mob.getHome();
-            site = mob.findBuildSite();
+            site = mob.house.findBuildSite();
             if (site == null) return fail(ctx, CompanionTexts.tr("handler.portal.no_site"));
             mob.logInfo(EventKind.PORTAL, CompanionTexts.tr("handler.portal.site", site.toShortString(), home == null ? Component.empty() : CompanionTexts.tr("handler.portal.home", home.toShortString())));
         }
         List<Task> build = new ArrayList<>();
-        for (BlockPos p : CompanionEntity.portalInside(site)) {
+        for (BlockPos p : dev.begleiter.CompanionPortals.inside(site)) {
             BlockState st = sl.getBlockState(p);
             // Nur den vorgefundenen Block abbauen; was bis zum Abbau dazukommt, bleibt stehen.
             if (!st.isAir() && !st.is(Blocks.NETHER_PORTAL) && !st.canBeReplaced()) build.add(Task.breakAt(p, st.getBlock()));
         }
         int missing = 0;
-        for (BlockPos p : CompanionEntity.portalFrame(site)) {
+        for (BlockPos p : dev.begleiter.CompanionPortals.frame(site)) {
             BlockState st = sl.getBlockState(p);
             if (st.is(Blocks.OBSIDIAN)) continue;
             missing++;
@@ -72,7 +72,7 @@ final class PortalHandler implements TaskHandler {
             mob.replaceCurrent(build);
             return Status.REPLACED;
         }
-        BlockPos first = CompanionEntity.portalInside(site).getFirst();
+        BlockPos first = dev.begleiter.CompanionPortals.inside(site).getFirst();
         if (sl.getBlockState(first).is(Blocks.NETHER_PORTAL)) {
             mob.setPortalPos(site);
             mob.tell(CompanionTexts.tr("handler.portal.done", first.toShortString()));
@@ -81,7 +81,7 @@ final class PortalHandler implements TaskHandler {
         if (mob.findItem(Items.FLINT_AND_STEEL) < 0 && !CompanionCraft.craft(mob, "flint_and_steel", 1))
             return fail(ctx, CompanionTexts.tr("handler.portal.no_lighter", mob.craftProblemComponent()));
         if (!ctx.approach(first, REACH_SQR)) return Status.RUNNING;
-        if (!mob.lightPortal(sl, site)) return fail(ctx, CompanionTexts.tr("handler.portal.bad_frame"));
+        if (!mob.portals.light(sl, site)) return fail(ctx, CompanionTexts.tr("handler.portal.bad_frame"));
         mob.setPortalPos(site);
         mob.tell(CompanionTexts.tr("handler.portal.lit", first.toShortString()));
         return Status.DONE;

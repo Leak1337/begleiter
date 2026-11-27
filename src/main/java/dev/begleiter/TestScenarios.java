@@ -1132,7 +1132,7 @@ public final class TestScenarios {
         b.removeAllEffects();
         b.clearFire();
         b.setHealth(b.getMaxHealth());
-        b.hunger = 20;
+        b.food.set(20);
         b.problemText = "";
         // bleibt sonst vom Zucht-Szenario (oder einem früheren Spiel) gespeichert an und schont die Tiere beim Jagen
         b.herdKeeping = false;

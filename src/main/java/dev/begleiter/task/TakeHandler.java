@@ -55,20 +55,28 @@ final class TakeHandler implements TaskHandler {
             if (trip != null) return trip;
         }
         if (!ctx.approach(take.pos(), REACH_SQR)) return Status.RUNNING;
-        Container box = mob.containerAt(sl, take.pos());
+        Container box = mob.orders.isPlanningHomeOrder() ? mob.orderStorage(sl, take.pos()) : mob.containerAt(sl, take.pos());
         int got = 0;
         int available = 0;
+        int reserve = mob.stockReserveAt(sl, take.pos(), wanted);
         if (box != null) {
             for (int i = 0; i < box.getContainerSize(); i++)
                 if (box.getItem(i).is(wanted)) available += box.getItem(i).getCount();
-            got = CompanionBuilder.takeFrom(mob, box, wanted, take.count());
-            mob.swingArm();
+            available = Math.max(0, available - reserve);
+            int allowed = reserve > 0 ? Math.min(take.count(), available) : take.count();
+            if (reserve == 0 || allowed > 0) got = CompanionBuilder.takeFrom(mob, box, wanted, allowed);
+            mob.useContainer(sl, take.pos());
             mob.logInfo(EventKind.LOOT, CompanionTexts.tr("handler.take.got", got, CompanionTexts.item(take.item())));
             mob.memory.noteChest(sl, take.pos(), box);
         }
+        if (mob.work.active() && got < take.count()) return Status.FAILED;
         if (mob.hasRecipeRequest() && got < take.count()) {
+            if (mob.orders.isPlanningHomeOrder()) {
+                mob.recoverRecipeProduction(CompanionTexts.tr("order.source_changed", CompanionTexts.item(take.item())));
+                return Status.REPLACED;
+            }
             int target = CompanionCraft.count(mob, take.item()) + take.count() - got;
-            mob.recoverRecipeSource(take.item(), target, box == null || available <= got ? take.pos() : null);
+            mob.orders.recoverRecipeSource(take.item(), target, box == null || available <= got ? take.pos() : null);
             if (got < Math.min(available, take.count()))
                 mob.pauseRecipeRequest(CompanionTexts.tr("processing.inventory_full", CompanionTexts.item(take.item())));
             return Status.REPLACED;

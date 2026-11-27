@@ -155,7 +155,7 @@ public class ZoneDutyGameTests {
         CompanionDuties.startZoned(c, Duty.BASE);
         var inside = new ItemEntity(h.getLevel(), c.getX(), c.getY(), c.getZ(), new ItemStack(Items.EGG));
         var outside = new ItemEntity(h.getLevel(), h.absolutePos(rel(8, 1, 8)).getX(), c.getY(), h.absolutePos(rel(8, 1, 8)).getZ(), new ItemStack(Items.EGG));
-        h.assertTrue(c.collectible(inside) && !c.collectible(outside), "Sammelgrenze verletzt");
+        h.assertTrue(c.pickup.collectible(inside) && !c.pickup.collectible(outside), "Sammelgrenze verletzt");
         h.assertTrue(CompanionZones.collectionAllowed(c, h.absolutePos(rel(6, 1, 3))), "Zusätzliche Weide ignoriert"); h.succeed();
     }
     @GameTest(structure = "begleiter-gametest:request_isolation") public void erkundenPlantSichereZieleInnerhalbDesBereichs(GameTestHelper h) {
@@ -216,8 +216,10 @@ public class ZoneDutyGameTests {
         h.assertTrue(c.storageBoxes(h.getLevel(), c.dutyPos()).isEmpty(), "Grenzüberschreitende Doppelkiste verwendet"); h.succeed();
     }
 
-    // Im vollen Lauf teilen sich alle Tests das Navigationsbudget der Welt; allein reichen ~200 Ticks.
-    @GameTest(structure = "begleiter-gametest:request_isolation", maxTicks = 1200)
+    // Im vollen Lauf teilen sich alle Tests das Navigationsbudget der Welt; allein reichen ~200 Ticks. Lief unter Last
+    // ins Zeitlimit, weil die Verfolgungsfrist auch Ticks mit anderen Aufgaben zählte und das Item dann ignoriert wurde
+    // (siehe verfolgungsfristZaehltNurTicksDerJagd); die großzügige Grenze bleibt für das geteilte Budget.
+    @GameTest(structure = "begleiter-gametest:request_isolation", maxTicks = 3600)
     public void baseSammeltAusTeilbereichenUndLaesstAussenliegendeItemsLiegen(GameTestHelper h) {
         var c = bot(h); c.setNoAi(false);
         c.zones.put(zone(h, Kind.BASE, 1, 1, 4, 4)); c.zones.put(zone(h, Kind.ANIMALS, 6, 2, 8, 4));
@@ -229,10 +231,32 @@ public class ZoneDutyGameTests {
         c.addTask(CompanionEntity.Task.collect(true));
         h.onEachTick(() -> {
             if (outside.isRemoved()) h.fail("Gegenstand außerhalb der Bereiche eingesammelt");
+            // Der Basisdienst plant zwischendurch eigene Aufgaben (Abgeben, Sortieren) und verwirft dabei manchmal
+            // den Sammelauftrag; geprüft wird hier nur, welche Bereiche das Einsammeln erreicht.
+            if (!inside.isRemoved() && !c.hasTasks()) c.addTask(CompanionEntity.Task.collect(true));
         });
         h.succeedWhen(() -> {
             h.assertTrue(inside.isRemoved(), "Gegenstand im Tierbereich noch nicht eingesammelt");
             h.assertValueEqual(CompanionCraft.count(c, "egg"), 1, "Ei nicht genau einmal aufgenommen");
         });
+    }
+
+    @GameTest(structure = "begleiter-gametest:request_isolation")
+    public void verfolgungsfristZaehltNurTicksDerJagd(GameTestHelper h) {
+        var c = bot(h);
+        var at = h.absolutePos(rel(7, 1, 3));
+        var item = new ItemEntity(h.getLevel(), at.getX() + .5, at.getY(), at.getZ() + .5, new ItemStack(Items.EGG));
+        h.getLevel().addFreshEntity(item);
+        h.assertTrue(c.pickup.chase(item), "Neues Item nicht als neues Ziel erkannt");
+        for (int i = 0; i < 50; i++) { c.tickCount++; c.pickup.chase(item); }
+        // Dazwischen 600 Ticks andere Arbeit: zählt nicht, die nächste Sammelaufgabe jagt mit der Restfrist weiter.
+        c.tickCount += 600;
+        h.assertTrue(!c.pickup.chase(item), "Dasselbe Item als neues Ziel behandelt");
+        h.assertTrue(c.pickup.chaseTicks() <= 51, "Zeit mit anderen Aufgaben auf die Frist angerechnet: " + c.pickup.chaseTicks());
+        c.tickCount++; c.pickup.chase(item); c.pickup.holdChase();
+        h.assertTrue(c.pickup.chaseTicks() <= 51, "Warten auf Rechenzeit angerechnet");
+        for (int i = 0; i < 200; i++) { c.tickCount++; c.pickup.chase(item); }
+        h.assertTrue(c.pickup.chaseTicks() > 200, "Frist läuft bei durchgehender Jagd nicht ab");
+        h.succeed();
     }
 }

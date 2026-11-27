@@ -135,13 +135,7 @@ public final class CompanionPlacement {
                                     Rotation extra) {
         if (!ServerPlayNetworking.canSend(player, SchematicPreview.TYPE))
             return CompanionBrain.startSchematicReply(player, bot, file, withAir, extra);
-        CompanionSchematics.Schematic plan;
-        try {
-            plan = CompanionSchematics.load((ServerLevel) bot.level(), file);
-        } catch (Exception ex) {
-            return CompanionBrain.startSchematicReply(player, bot, file, withAir, extra); // meldet den Lesefehler
-        }
-        return beginSchematic(player, bot, plan, withAir, extra);
+        return SchematicLoader.request(player, bot, file, (p, plan) -> beginSchematic(p, bot, plan, withAir, extra));
     }
 
     /** Den schon geprüften Plan verwenden, auch wenn sich die Datei ändert, während der Katalog offen ist. */
@@ -199,7 +193,7 @@ public final class CompanionPlacement {
         if (request.movement >= 0 && request.movement < movements.length) bot.buildMovementOverride = movements[request.movement];
         bot.cancelAll();
         bot.build = job;
-        bot.addTask(CompanionEntity.Task.build());
+        bot.queueBuild();
         PENDING.remove(player.getUUID());
         if (file) return new Feedback(request.token, true, CompanionBrain.withAirHint(
                 CompanionTexts.tr("placement.schematic", CompanionTexts.buildName(plan.name()),

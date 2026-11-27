@@ -1,5 +1,6 @@
 package dev.begleiter;
 
+import dev.begleiter.world.SafeLevel;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -7,7 +8,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -36,7 +39,9 @@ public final class CompanionMemory {
     public enum Kind {
         ORE(2), TREE(8), WATER(12), LAVA(6), SPAWNER(0), PORTAL(4), VILLAGE(64), CHEST(0), DANGER(4), DEATH(2),
         /** Vom Spieler benannte Orte ("Merk dir das als Mine"); Schlüssel = Name. Werden nie vergessen. */
-        WAYPOINT(0);
+        WAYPOINT(0),
+        /** Werkbank, Ofen, Amboss ...; Schlüssel = vollständige Block-ID. Beim Wiederfinden geprüft. */
+        STATION(0);
 
         /** Einträge gleicher Art und Schlüssel, die näher als das beieinander liegen, werden zusammengelegt. */
         final int merge;
@@ -54,6 +59,8 @@ public final class CompanionMemory {
         public long seen;
         /** Kisten: Inhalt als vollständige Registry-ID (mit Namensraum) -> Anzahl. */
         public final Map<String, Integer> items = new LinkedHashMap<>();
+        /** Reihenfolge des Merkens: bei gleicher Entfernung gewinnt der früher gemerkte Ort (wie die lineare Suche). */
+        long seq;
 
         public int itemCount(Item item) {
             return items.getOrDefault(BuiltInRegistries.ITEM.getKey(item).toString(), 0);
@@ -77,7 +84,131 @@ public final class CompanionMemory {
             Resources.REDSTONE, Resources.LAPIS, Resources.COPPER, Resources.EMERALD, Resources.OBSIDIAN};
 
     private final List<Place> places = new ArrayList<>();
+    /** Räumlicher Index: Dimension -> Chunk -> Orte. Wird ausschließlich über add/remove/removeIf/clear gepflegt. */
+    private final Map<String, Long2ObjectOpenHashMap<List<Place>>> index = new HashMap<>();
+    private long nextSeq;
     private int scanLayer;
+
+    private static long chunkKey(int x, int z) {
+        return ChunkPos.pack(x >> 4, z >> 4);
+    }
+
+    /** Einziger Weg hinein: Liste und Index zusammen. */
+    void add(Place p) {
+        p.seq = nextSeq++;
+        places.add(p);
+        index.computeIfAbsent(p.dim, d -> new Long2ObjectOpenHashMap<>())
+                .computeIfAbsent(chunkKey(p.pos.getX(), p.pos.getZ()), k -> new ArrayList<>()).add(p);
+    }
+
+    private void unindex(Place p) {
+        var buckets = index.get(p.dim);
+        if (buckets == null) return;
+        long key = chunkKey(p.pos.getX(), p.pos.getZ());
+        List<Place> bucket = buckets.get(key);
+        if (bucket == null) return;
+        bucket.remove(p);
+        if (bucket.isEmpty()) buckets.remove(key);
+        if (buckets.isEmpty()) index.remove(p.dim);
+    }
+
+    private boolean remove(Place p) {
+        if (!places.remove(p)) return false;
+        unindex(p);
+        return true;
+    }
+
+    private boolean removeIf(java.util.function.Predicate<Place> filter) {
+        boolean any = false;
+        for (var it = places.iterator(); it.hasNext(); ) {
+            Place p = it.next();
+            if (!filter.test(p)) continue;
+            it.remove();
+            unindex(p);
+            any = true;
+        }
+        return any;
+    }
+
+    /** Für Tests: stimmen Liste und Index überein (jeder Ort genau einmal, im richtigen Chunk)? */
+    boolean indexConsistent() {
+        int indexed = 0;
+        for (var dim : index.entrySet())
+            for (var bucket : dim.getValue().long2ObjectEntrySet()) {
+                if (bucket.getValue().isEmpty()) return false;
+                for (Place p : bucket.getValue()) {
+                    if (!p.dim.equals(dim.getKey()) || chunkKey(p.pos.getX(), p.pos.getZ()) != bucket.getLongKey()) return false;
+                    indexed++;
+                }
+            }
+        if (indexed != places.size()) return false;
+        for (int i = 1; i < places.size(); i++) if (places.get(i - 1).seq >= places.get(i).seq) return false;
+        return true;
+    }
+
+    /**
+     * Nächster passender Ort (echter Abstand < maxDist) mit derselben Gleichstandsregel wie die lineare Suche.
+     * Sucht Chunk-Ringe um den Startpunkt und hört auf, sobald ein Ring nicht mehr näher sein kann. Bei riesigen Radien
+     * (mehr Chunks als Einträge) ist die begrenzte Liste schneller als Millionen leerer Chunks.
+     */
+    private Place nearestMatching(String dim, BlockPos from, int maxDist, java.util.function.Predicate<Place> match) {
+        var buckets = index.get(dim);
+        if (buckets == null || maxDist <= 0) return null;
+        double bd = (double) maxDist * maxDist;
+        Place best = null;
+        int rings = (maxDist >> 4) + 1;
+        long chunks = (2L * rings + 1) * (2L * rings + 1);
+        if (chunks > 4L * buckets.size() + 64) {
+            for (Place p : places) {
+                if (!p.dim.equals(dim) || !match.test(p)) continue;
+                double dd = p.pos.distSqr(from);
+                if (dd < bd) { bd = dd; best = p; }
+            }
+            return best;
+        }
+        int cx = from.getX() >> 4, cz = from.getZ() >> 4;
+        for (int k = 0; k <= rings; k++) {
+            if (k > 0) {
+                double lower = (double) (k - 1) * 16; // waagerecht mindestens so weit weg
+                if (lower * lower > bd) break;
+            }
+            for (int dx = -k; dx <= k; dx++) {
+                boolean edgeX = dx == -k || dx == k;
+                for (int dz = -k; dz <= k; dz++) {
+                    if (!edgeX && dz != -k && dz != k) continue;
+                    List<Place> bucket = buckets.get(ChunkPos.pack(cx + dx, cz + dz));
+                    if (bucket == null) continue;
+                    for (Place p : bucket) {
+                        if (!match.test(p)) continue;
+                        double dd = p.pos.distSqr(from);
+                        if (dd < bd || (best != null && dd == bd && p.seq < best.seq)) { bd = dd; best = p; }
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /** Orte im Quader um pos (waagerecht ±r), in Merk-Reihenfolge; riesige Quader über die Liste. */
+    private List<Place> around(String dim, BlockPos pos, int r) {
+        var buckets = index.get(dim);
+        if (buckets == null) return List.of();
+        int minX = (pos.getX() - r) >> 4, maxX = (pos.getX() + r) >> 4;
+        int minZ = (pos.getZ() - r) >> 4, maxZ = (pos.getZ() + r) >> 4;
+        long chunks = (long) (maxX - minX + 1) * (maxZ - minZ + 1);
+        List<Place> out = new ArrayList<>();
+        if (chunks > 4L * buckets.size() + 64) {
+            for (Place p : places) if (p.dim.equals(dim)) out.add(p);
+            return out;
+        }
+        for (int x = minX; x <= maxX; x++)
+            for (int z = minZ; z <= maxZ; z++) {
+                List<Place> bucket = buckets.get(ChunkPos.pack(x, z));
+                if (bucket != null) out.addAll(bucket);
+            }
+        out.sort(Comparator.comparingLong(p -> p.seq));
+        return out;
+    }
 
     private static String canonicalKey(Kind kind, String key) {
         if (key == null) return "";
@@ -91,9 +222,10 @@ public final class CompanionMemory {
 
     public static String dim(ServerLevel sl) { return sl.dimension().identifier().toString(); }
 
-    public List<Place> all() { return places; }
+    /** Alle Orte in Merk-Reihenfolge, nur lesend. Ändern nur über die Methoden dieser Klasse. */
+    public List<Place> all() { return java.util.Collections.unmodifiableList(places); }
     public int size() { return places.size(); }
-    public void clear() { places.clear(); }
+    public void clear() { places.clear(); index.clear(); }
 
     // ------------------------------------------------------------------ Merken / Vergessen
 
@@ -101,8 +233,8 @@ public final class CompanionMemory {
         String d = dim(sl);
         long now = sl.getGameTime();
         String k = canonicalKey(kind, key);
-        for (Place p : places) {
-            if (p.kind != kind || !p.dim.equals(d) || !p.key.equals(k)) continue;
+        for (Place p : around(d, pos, Math.max(0, kind.merge))) { // erster Treffer in Merk-Reihenfolge, wie zuvor
+            if (p.kind != kind || !p.key.equals(k)) continue;
             if (p.pos.equals(pos)) { p.seen = now; return p; }
             if (kind.merge > 0 && p.pos.distManhattan(pos) <= kind.merge) {
                 p.seen = now;
@@ -111,7 +243,7 @@ public final class CompanionMemory {
             }
         }
         Place np = new Place(kind, k, d, pos, now);
-        places.add(np);
+        add(np);
         trim(kind, k);
         return np;
     }
@@ -127,10 +259,10 @@ public final class CompanionMemory {
         long count = places.stream().filter(same0).count();
         if (count <= max) return;
         List<Place> same = places.stream().filter(same0).sorted(Comparator.comparingLong(p -> p.seen)).toList();
-        for (int i = 0; i < same.size() - max; i++) places.remove(same.get(i));
+        for (int i = 0; i < same.size() - max; i++) remove(same.get(i));
     }
 
-    public void forget(Place p) { places.remove(p); }
+    public void forget(Place p) { remove(p); }
 
     /** Als falsch erkannte Orte (hingegangen, nichts Brauchbares): eine Weile nicht wieder merken, sonst Endlosschleife. */
     private final List<Place> rejected = new ArrayList<>();
@@ -138,7 +270,7 @@ public final class CompanionMemory {
 
     /** Vergessen und so lange nicht neu lernen, bis {@link #REJECT_FOR} vorbei ist. */
     public void reject(Place p, ServerLevel sl) {
-        places.remove(p);
+        remove(p);
         rejected.removeIf(r -> sl.getGameTime() - r.seen > REJECT_FOR);
         rejected.add(new Place(p.kind, p.key, p.dim, p.pos, sl.getGameTime()));
     }
@@ -154,7 +286,7 @@ public final class CompanionMemory {
     public void forgetNear(Kind kind, String key, ServerLevel sl, BlockPos pos, int r) {
         String d = dim(sl);
         String wanted = key == null ? null : canonicalKey(kind, key);
-        places.removeIf(p -> p.kind == kind && p.dim.equals(d) && (wanted == null || p.key.equals(wanted))
+        removeIf(p -> p.kind == kind && p.dim.equals(d) && (wanted == null || p.key.equals(wanted))
                 && p.pos.distManhattan(pos) <= r);
     }
 
@@ -174,14 +306,7 @@ public final class CompanionMemory {
     public Place nearest(Kind kind, String key, ServerLevel sl, BlockPos from, int maxDist) {
         String d = dim(sl);
         String wanted = key == null ? null : canonicalKey(kind, key);
-        Place best = null;
-        double bd = (double) maxDist * maxDist;
-        for (Place p : places) {
-            if (p.kind != kind || !p.dim.equals(d) || (wanted != null && !p.key.equals(wanted))) continue;
-            double dd = p.pos.distSqr(from);
-            if (dd < bd) { bd = dd; best = p; }
-        }
-        return best;
+        return nearestMatching(d, from, maxDist, p -> p.kind == kind && (wanted == null || p.key.equals(wanted)));
     }
 
     public List<Place> find(Kind kind, String key, ServerLevel sl, BlockPos from) {
@@ -198,23 +323,21 @@ public final class CompanionMemory {
 
     public Place chestWith(Item item, ServerLevel sl, BlockPos from, int maxDist,
                            java.util.function.Predicate<BlockPos> allowed) {
-        String d = dim(sl);
-        Place best = null;
-        double bd = (double) maxDist * maxDist;
-        for (Place p : places) {
-            if (p.kind != Kind.CHEST || !p.dim.equals(d) || p.itemCount(item) <= 0) continue;
-            if (!allowed.test(p.pos)) continue;
-            double dd = p.pos.distSqr(from);
-            if (dd < bd) { bd = dd; best = p; }
-        }
-        return best;
+        return nearestMatching(dim(sl), from, maxDist,
+                p -> p.kind == Kind.CHEST && p.itemCount(item) > 0 && allowed.test(p.pos));
     }
 
     /** Ist diese Stelle als gefährlich bekannt (Gefahr oder Todesort im Umkreis r)? */
     public boolean dangerous(ServerLevel sl, BlockPos pos, int r) {
-        String d = dim(sl);
-        for (Place p : places)
-            if ((p.kind == Kind.DANGER || p.kind == Kind.DEATH) && p.dim.equals(d) && p.pos.distManhattan(pos) <= r) return true;
+        if (r < 0) return false;
+        for (Place p : around(dim(sl), pos, r))
+            if ((p.kind == Kind.DANGER || p.kind == Kind.DEATH) && p.pos.distManhattan(pos) <= r) return true;
+        return false;
+    }
+
+    public boolean knownHazard(ServerLevel sl, BlockPos pos, int r) {
+        for (Place p : around(dim(sl), pos, r))
+            if (p.kind == Kind.DANGER && p.pos.distManhattan(pos) <= r) return true;
         return false;
     }
 
@@ -257,6 +380,10 @@ public final class CompanionMemory {
                     kind = Kind.WATER;
                 } else if (s.getFluidState().isSourceOfType(Fluids.LAVA)) {
                     kind = Kind.LAVA;
+                } else if (s.is(Blocks.GRAVEL)) {
+                    // Kies (Feuerstein fürs Feuerzeug und die Pfeile) ist selten an der Oberfläche: gesehenen merken
+                    kind = Kind.ORE;
+                    key = Resources.GRAVEL.key();
                 } else {
                     for (Resources.Res res : ORES) if (res.block().test(s)) { kind = Kind.ORE; key = res.key(); break; }
                 }
@@ -284,7 +411,11 @@ public final class CompanionMemory {
     }
 
     /** Erz-Gespür ("Röntgenblick" nur für Erze): Umkreis waagerecht und senkrecht. Nicht die halbe Welt. */
+    /** Vorgabe des Erz-Gespürs; wirksam ist {@link #xrayRadius()} aus der Konfiguration. */
     public static final int XRAY_RADIUS = 32, XRAY_HEIGHT = 24;
+
+    /** Radius des Erz-Gespürs laut Konfiguration (8 bis 64, Vorgabe 32). */
+    public static int xrayRadius() { return dev.begleiter.config.BegleiterConfig.get().xrayRadius; }
     private int xrayLayer;
 
     /**
@@ -292,6 +423,8 @@ public final class CompanionMemory {
      * eine komplette Runde dauert so etwa 5 Sekunden.
      */
     public void xrayScan(CompanionEntity e, ServerLevel sl) {
+        if (!dev.begleiter.config.BegleiterConfig.get().xray) return; // abgeschaltet: nur, was er wirklich sieht
+        final int XRAY_RADIUS = xrayRadius();
         int dy = xrayLayer - XRAY_HEIGHT;
         xrayLayer = (xrayLayer + 1) % (XRAY_HEIGHT * 2 + 1);
         BlockPos c = e.blockPosition();
@@ -350,10 +483,11 @@ public final class CompanionMemory {
         String d = dim(sl);
         BlockPos c = e.blockPosition();
         long now = sl.getGameTime();
-        places.removeIf(p -> {
+        removeIf(p -> {
             if (p.kind == Kind.WAYPOINT) return false;
             if (p.kind != Kind.DEATH && p.kind != Kind.CHEST && now - p.seen > FORGET_AFTER) return true;
-            if (!p.dim.equals(d) || p.pos.distSqr(c) > 24 * 24 || !sl.hasChunkAt(p.pos)) return false;
+            // Prüft bis zu 3 Blöcke um den Ort: nur wenn alles geladen ist, sonst bleibt er gemerkt
+            if (!p.dim.equals(d) || p.pos.distSqr(c) > 24 * 24 || !SafeLevel.loaded(sl, p.pos.offset(-3, 0, -3), p.pos.offset(3, 0, 3))) return false;
             return !stillThere(sl, p);
         });
     }
@@ -379,20 +513,21 @@ public final class CompanionMemory {
             case SPAWNER -> s.is(Blocks.SPAWNER);
             case PORTAL -> s.is(Blocks.NETHER_PORTAL);
             case CHEST -> s.getBlock() instanceof ChestBlock || s.getBlock() instanceof BarrelBlock;
+            case STATION -> p.key.equals(BuiltInRegistries.BLOCK.getKey(s.getBlock()).toString());
             case VILLAGE, DANGER, DEATH, WAYPOINT -> true;
         };
     }
 
     private static boolean nearbyFluid(ServerLevel sl, BlockPos c, boolean water) {
         for (BlockPos q : BlockPos.betweenClosed(c.offset(-3, -2, -3), c.offset(3, 2, 3)))
-            if (sl.getFluidState(q).isSourceOfType(water ? Fluids.WATER : Fluids.LAVA)) return true;
+            if (SafeLevel.test(sl, q, s -> s.getFluidState().isSourceOfType(water ? Fluids.WATER : Fluids.LAVA))) return true;
         return false;
     }
 
     private static boolean hasLeaves(ServerLevel sl, BlockPos p) {
         int n = 0;
         for (BlockPos q : BlockPos.betweenClosed(p.offset(-2, 0, -2), p.offset(2, 6, 2)))
-            if (sl.getBlockState(q).is(BlockTags.LEAVES) && ++n >= 3) return true;
+            if (SafeLevel.test(sl, q, s -> s.is(BlockTags.LEAVES)) && ++n >= 3) return true;
         return false;
     }
 
@@ -409,9 +544,9 @@ public final class CompanionMemory {
     /** Benannten Ort setzen (gleicher Name in dieser Dimension wird verschoben). */
     public Place setWaypoint(String name, ServerLevel sl, BlockPos pos) {
         String d = dim(sl);
-        places.removeIf(p -> p.kind == Kind.WAYPOINT && p.key.equals(name) && p.dim.equals(d));
+        removeIf(p -> p.kind == Kind.WAYPOINT && p.key.equals(name) && p.dim.equals(d));
         Place np = new Place(Kind.WAYPOINT, name, d, pos, sl.getGameTime());
-        places.add(np);
+        add(np);
         return np;
     }
 
@@ -441,7 +576,7 @@ public final class CompanionMemory {
     }
 
     public boolean removeWaypoint(String name) {
-        return places.removeIf(p -> p.kind == Kind.WAYPOINT && p.key.equals(name));
+        return removeIf(p -> p.kind == Kind.WAYPOINT && p.key.equals(name));
     }
 
     /** Alle erinnerten Orte, nur lesend (z.B. für den LLM-Kontext). */
@@ -481,7 +616,7 @@ public final class CompanionMemory {
 
     /** Kaputte oder übergroße Daten dürfen die Grenzen beim Merken nicht umgehen. */
     public void load(CompoundTag t) {
-        places.clear();
+        clear();
         int version = t.getIntOr("V", 0);
         if (version < 0 || version > 1) return;
         final int maxLoaded = 4096;
@@ -518,7 +653,7 @@ public final class CompanionMemory {
                     seen++;
                 }
             }
-            places.add(p);
+            add(p);
             counts.put(group, count + 1);
         }
     }

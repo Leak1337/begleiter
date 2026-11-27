@@ -312,8 +312,10 @@ final class TestMachineScenarios {
                 for (var entry : plan.blocks().entrySet()) {
                     var target = entry.getValue();
                     if (target.isAir()) continue;
-                    if (!CompanionBuilder.matches(x.sl.getBlockState(x.c.offset(entry.getKey())), target))
-                        return fail("Farmbauteil fehlt: " + id + " " + entry.getKey().toShortString());
+                    var actual = x.sl.getBlockState(x.c.offset(entry.getKey()));
+                    // Gras auf geplanter Erde u. Ä. ist Welt, kein fehlendes Bauteil (wie in der Bau-Nachkontrolle)
+                    if (!CompanionBuilder.matches(actual, target) && !CompanionBuilder.naturalChange(target, actual))
+                        return fail("Farmbauteil fehlt: " + id + " " + entry.getKey().toShortString() + " soll " + target + " ist " + actual);
                 }
                 return ok("Farm vollständig gebaut; Pflanzen, Gehege und Lager bleiben nach Updates erhalten");
             }))).toList();

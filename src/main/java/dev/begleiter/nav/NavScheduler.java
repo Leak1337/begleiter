@@ -21,7 +21,10 @@ public final class NavScheduler {
         ServerTickEvents.START_SERVER_TICK.register(server -> {
             synchronized (SERVERS) {
                 NavScheduler scheduler = SERVERS.get(server);
-                if (scheduler != null) scheduler.budget.beginTick();
+                if (scheduler != null) {
+                    scheduler.budget.setLimit(dev.begleiter.config.BegleiterConfig.get().navBudgetNanos());
+                    scheduler.budget.beginTick();
+                }
             }
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(NavScheduler::reset);

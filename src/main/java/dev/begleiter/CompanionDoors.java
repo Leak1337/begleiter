@@ -43,6 +43,7 @@ public final class CompanionDoors {
 
     /** Holztür oder Zauntor öffnen/schließen (Eisentüren gehen nur mit Redstone). */
     public static boolean setOpen(ServerLevel sl, CompanionEntity e, BlockPos p, boolean open) {
+        if (!e.mayUse(sl, p)) return false;
         BlockState s = sl.getBlockState(p);
         if (s.getBlock() instanceof DoorBlock door && DoorBlock.isWoodenDoor(s)) {
             if (s.getValue(DoorBlock.OPEN) == open) return false;

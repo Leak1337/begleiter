@@ -51,7 +51,7 @@ public final class CompanionCommands {
                                     return with(c, (p, comp) -> printLog(p, comp, n));
                                 })))
                 .then(simple("debug", (p, c) -> {
-                    c.debugComponents().forEach(p::sendSystemMessage);
+                    c.watchdog.debugComponents().forEach(p::sendSystemMessage);
                     return 1;
                 }))
                 .then(simple("free", (p, c) -> { c.freeRoam(); return msg(p, CompanionTexts.tr("reply.free")); }))
@@ -80,6 +80,7 @@ public final class CompanionCommands {
                                 .then(Commands.literal("luft").executes(c -> schematic(c, true)))))
                 .then(simple("material", (p, c) -> c.build == null ? fail(p, CompanionTexts.tr("build.none"))
                         : msg(p, materialReply(c))))
+                .then(configNode("config", "reload"))
                 .then(Commands.literal("parkourtest")
                         // Dieser Befehl räumt und ersetzt Tausende Weltblöcke.
                         // Nur für Weltbesitzer/Operatoren, nicht für gewöhnliche Begleiter-Besitzer.
@@ -162,7 +163,7 @@ public final class CompanionCommands {
                                             return msg(p, "Station " + st.id() + " rebuilt.");
                                         }))))
                 .then(simple("sort", (p, c) -> msg(p, CompanionBrain.orderSortReply(p, c))))
-                .then(simple("tidy", (p, c) -> { c.queueTidy(); return msg(p, CompanionTexts.tr("command.tidy")); }))
+                .then(simple("tidy", (p, c) -> { c.orders.queueTidy(); return msg(p, CompanionTexts.tr("command.tidy")); }))
                 .then(simple("keeper", (p, c) -> c.makeKeeper()
                         ? msg(p, CompanionTexts.tr("reply.keeper"))
                         : fail(p, CompanionTexts.tr("reply.no_home"))))
@@ -217,11 +218,12 @@ public final class CompanionCommands {
                                 .executes(c -> with(c, CompanionCommands::verifyProject)))
                         .then(Commands.literal("verwerfen")
                                 .executes(c -> with(c, CompanionCommands::discardProject))))
+                .then(configNode("einstellungen", "aktualisieren"))
                 .then(simple("bauplaene", (p, c) -> msg(p, CompanionBrain.listSchematicsReply())))
                 .then(simple("sortieren", (p, c) -> msg(p, CompanionBrain.orderSortReply(p, c))))
-                .then(simple("einlagern", (p, c) -> { c.queueTidy(); return msg(p, CompanionTexts.tr("command.store")); }))
+                .then(simple("einlagern", (p, c) -> { c.orders.queueTidy(); return msg(p, CompanionTexts.tr("command.store")); }))
                 .then(simple("diagnose", (p, c) -> {
-                    c.debugComponents().forEach(p::sendSystemMessage);
+                    c.watchdog.debugComponents().forEach(p::sendSystemMessage);
                     return 1;
                 }))
                 .then(simple("material", (p, c) -> c.build == null ? fail(p, CompanionTexts.tr("build.none"))
@@ -269,6 +271,23 @@ public final class CompanionCommands {
                                                 .executes(c -> clear(c, "breite", "hoehe", "tiefe")))))));
     }
 
+    /** Serverweite Einstellungen neu laden: nur für Operatoren (auch von der Konsole), in beiden Befehlsbäumen gleich. */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<net.minecraft.commands.CommandSourceStack> configNode(
+            String name, String reload) {
+        return Commands.literal(name)
+                .requires(source -> source.permissions().hasPermission(
+                        net.minecraft.server.permissions.Permissions.COMMANDS_GAMEMASTER))
+                .then(Commands.literal(reload).executes(c -> {
+                    String error = dev.begleiter.config.BegleiterConfig.reload(dev.begleiter.config.BegleiterConfig.file());
+                    if (error != null) {
+                        c.getSource().sendFailure(CompanionTexts.tr("config.invalid", CompanionTexts.literal(error)));
+                        return 0;
+                    }
+                    c.getSource().sendSuccess(() -> CompanionTexts.tr("config.reloaded"), true);
+                    return 1;
+                }));
+    }
+
     @FunctionalInterface
     private interface Action { int run(ServerPlayer p, CompanionEntity c); }
 
@@ -301,7 +320,7 @@ public final class CompanionCommands {
     }
 
     private static int printLog(ServerPlayer p, CompanionEntity comp, int n) {
-        List<CompanionEntity.LogEntry> lines = comp.getLog(0, n, false);
+        List<CompanionLog.Entry> lines = comp.getLog(0, n, false);
         for (int i = lines.size() - 1; i >= 0; i--)
             p.sendSystemMessage(CompanionEntity.formatLogText(lines.get(i)));
         return lines.size();
@@ -373,7 +392,7 @@ public final class CompanionCommands {
     private static int gather(CommandContext<CommandSourceStack> c, int count) throws CommandSyntaxException {
         Block b = block(c);
         return with(c, (p, comp) -> {
-            int n = comp.queueGather(b, count);
+            int n = comp.gathering.queueGather(b, count);
             return n == 0 ? fail(p, CompanionTexts.tr("command.gather.none", b.getName()))
                     : msg(p, CompanionTexts.tr("command.gather", n, b.getName()));
         });
@@ -389,7 +408,7 @@ public final class CompanionCommands {
         int w = IntegerArgumentType.getInteger(c, width);
         int other = IntegerArgumentType.getInteger(c, extent);
         return with(c, (p, comp) -> {
-            int n = platform ? comp.queuePlatform(p, b, w, other) : comp.queueWall(p, b, w, other);
+            int n = platform ? comp.orders.queuePlatform(p, b, w, other) : comp.orders.queueWall(p, b, w, other);
             return msg(p, CompanionTexts.tr("command.build", n, b.getName()));
         });
     }
@@ -400,7 +419,7 @@ public final class CompanionCommands {
         int h = IntegerArgumentType.getInteger(c, height);
         int d = IntegerArgumentType.getInteger(c, depth);
         return with(c, (p, comp) -> {
-            int n = comp.queueClear(p, w, h, d);
+            int n = comp.orders.queueClear(p, w, h, d);
             return n == 0 ? fail(p, CompanionTexts.tr("command.clear.none")) : msg(p, CompanionTexts.tr("command.clear", n));
         });
     }

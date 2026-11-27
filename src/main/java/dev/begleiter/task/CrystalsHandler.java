@@ -28,7 +28,7 @@ final class CrystalsHandler implements TaskHandler {
             mob.problem(CompanionTexts.tr("handler.crystals.no_bow"));
             return Status.FAILED;
         }
-        var crystals = mob.endCrystals(160);
+        var crystals = mob.expedition.endCrystals(160);
         if (crystals.isEmpty()) {
             mob.logInfo(CompanionTexts.tr("handler.crystals.none"));
             return Status.DONE;

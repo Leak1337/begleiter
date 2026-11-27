@@ -177,6 +177,23 @@ public class NavExecTests {
                 "Tür abgebaut statt geöffnet"));
     }
 
+    /** Beobachtet: Haus mit Birkentür, vor der Türschwelle geht es 2 Blöcke in einen Krater hinab. */
+    @GameTest(maxTicks = 400)
+    public void gehtDurchBirkentuerUndSpringtInDenKrater(GameTestHelper h) {
+        floor(h);
+        ring(h, 1);
+        box(h, 1, 1, 1, 5, 2, 6, Blocks.DIRT);          // erhöhter Boden für Haus und Schwelle (Oberkante y=2)
+        box(h, 4, 3, 1, 4, 5, 6, Blocks.OAK_PLANKS);    // Hauswand x=4
+        var door = Blocks.BIRCH_DOOR.defaultBlockState().setValue(net.minecraft.world.level.block.DoorBlock.FACING,
+                net.minecraft.core.Direction.EAST);
+        h.setBlock(4, 3, 3, door.setValue(net.minecraft.world.level.block.DoorBlock.HALF,
+                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER));
+        h.setBlock(4, 4, 3, door.setValue(net.minecraft.world.level.block.DoorBlock.HALF,
+                net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER));
+        CompanionEntity c = companion(h, new BlockPos(2, 3, 3));
+        driveTo(h, c, new BlockPos(6, 1, 3), null);     // Kraterboden: x=6 liegt 2 tiefer als die Schwelle x=5
+    }
+
     @GameTest(maxTicks = 300)
     public void oeffnetZauntor(GameTestHelper h) {
         wallWith(h, Blocks.OAK_FENCE_GATE.defaultBlockState().setValue(net.minecraft.world.level.block.FenceGateBlock.FACING,

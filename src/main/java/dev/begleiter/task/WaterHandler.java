@@ -38,7 +38,7 @@ final class WaterHandler implements TaskHandler {
         }
         BlockPos water = spec.pos();
         if (water == null || !sl.getFluidState(water).isSourceOfType(Fluids.WATER)) {
-            water = mob.findWaterSource(24);
+            water = mob.portals.findWaterSource(24);
             if (water != null) {
                 mob.replaceCurrent(List.of(new Task(new TaskSpec.Water(water), task.tries())));
                 return Status.REPLACED;
@@ -60,7 +60,7 @@ final class WaterHandler implements TaskHandler {
         }
         if (!ctx.approach(water, REACH_SQR)) return Status.RUNNING;
         mob.getLookControl().setLookAt(Vec3.atCenterOf(water));
-        if (!mob.fillBucket(sl, water) || mob.findItem(Items.WATER_BUCKET) < 0) {
+        if (!mob.portals.fillBucket(sl, water) || mob.findItem(Items.WATER_BUCKET) < 0) {
             mob.logWarn(CompanionTexts.tr("handler.water.unconfirmed", water.toShortString()));
             return Status.FAILED;
         }

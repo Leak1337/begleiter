@@ -1,0 +1,6 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": ["minecraft:copper_ingot", "minecraft:copper_ingot", "minecraft:stick"],
+  "result": {"id": "begleiter:companion_whistle"}
+}

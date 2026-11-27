@@ -1,4 +1,4 @@
-// MIT: Begleiter heap before the Baritone comparison, retained as a benchmark baseline.
+// Apache-2.0: Begleiter heap before the Baritone comparison, retained as a benchmark baseline.
 package dev.begleiter.nav;
 
 import java.util.Arrays;

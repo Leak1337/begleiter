@@ -46,11 +46,15 @@ public final class CompanionBrain {
         List<CompanionEntity> mine = p.level().getEntitiesOfClass(CompanionEntity.class,
                 p.getBoundingBox().inflate(64), e -> e.isOwner(p));
         if (mine.isEmpty()) return;
-        ChatAddress.Command command = ChatAddress.parse(raw, mine.stream()
+        var config = dev.begleiter.config.BegleiterConfig.get();
+        var candidates = mine.stream()
                 .map(c -> new ChatAddress.Candidate(c.getUUID(),
                         c.getCustomName() == null ? "" : c.getCustomName().getString(), p.distanceToSqr(c)))
-                .toList());
-        if (command == null) return;
+                .toList();
+        ChatAddress.Command parsed = ChatAddress.parse(raw, candidates, config.prefix);
+        if (parsed == null && !requiresAddress(p, config)) parsed = ChatAddress.unaddressed(raw, candidates);
+        if (parsed == null) return;
+        ChatAddress.Command command = parsed;
         CompanionEntity target = mine.stream().filter(c -> c.getUUID().equals(command.target())).findFirst().orElseThrow();
         String text = command.text();
         target.chatSerial++;
@@ -69,6 +73,21 @@ public final class CompanionBrain {
         } else if (!CompanionLlmChat.start(p, target, text, p.clientInformation().language())) {
             target.tell(CompanionTexts.tr("reply.unknown"));
         }
+    }
+
+    /**
+     * Muss diese Zeile den Begleiter ansprechen? ALWAYS: ja. NEVER: nein. AUTO: nur im integrierten Einzelspieler,
+     * in dem der Spieler allein ist, ist keine Ansprache nötig; Dedicated-Server und LAN mit mehreren immer mit.
+     */
+    static boolean requiresAddress(ServerPlayer p, dev.begleiter.config.BegleiterConfig config) {
+        return switch (config.address) {
+            case ALWAYS -> true;
+            case NEVER -> false;
+            case AUTO -> {
+                var server = p.level().getServer();
+                yield server.isDedicatedServer() || server.getPlayerCount() != 1;
+            }
+        };
     }
 
     private static int countItems(CompanionEntity c, Resources.Res res) {
@@ -129,7 +148,7 @@ public final class CompanionBrain {
         if (job == null) return CompanionTexts.tr("build.out_of_world");
         c.cancelAll();
         c.build = job;
-        c.addTask(Task.build());
+        c.queueBuild();
         Component mats = CompanionTexts.buildingMaterials(c);
         return CompanionTexts.tr("build.structure", farm ? CompanionTexts.tr("build.farm") : CompanionTexts.tr("build.house." + (style == CompanionStructures.STONE ? "stone" : style == CompanionStructures.BIRCH ? "birch" : "wood")), s.sizeX(), s.sizeZ(), mats);
     }
@@ -167,7 +186,7 @@ public final class CompanionBrain {
         if (job == null) return CompanionTexts.tr("build.out_of_world");
         c.cancelAll();
         c.build = job;
-        c.addTask(Task.build());
+        c.queueBuild();
         return CompanionTexts.tr("build.machine", blueprint.title(), s.sizeX(), s.sizeY(), s.sizeZ(),
                 CompanionTexts.buildingMaterials(c), blueprint.help());
     }
@@ -197,14 +216,8 @@ public final class CompanionBrain {
 
     public static Component startSchematicReply(ServerPlayer p, CompanionEntity c, java.nio.file.Path file, boolean withAir,
                                         net.minecraft.world.level.block.Rotation extra) {
-        CompanionSchematics.Schematic s;
-        try {
-            s = CompanionSchematics.load((ServerLevel) c.level(), file);
-        } catch (Exception ex) {
-            c.logError(CompanionTexts.tr("log.schematic.error", CompanionTexts.literal(file.getFileName().toString()), CompanionTexts.literal(String.valueOf(ex))));
-            return CompanionTexts.tr("schematic.unreadable", CompanionTexts.literal(file.getFileName().toString()), CompanionTexts.literal(String.valueOf(ex.getMessage())));
-        }
-        return startSchematicReply(p, c, s, withAir, extra);
+        // Lesen im Hintergrund; der Bau beginnt im Serverthread, wenn die Datei da ist (Antwort dann an den Spieler)
+        return SchematicLoader.request(p, c, file, (player, s) -> startSchematicReply(player, c, s, withAir, extra));
     }
 
     static Component startSchematicReply(ServerPlayer p, CompanionEntity c, CompanionSchematics.Schematic s,
@@ -219,7 +232,7 @@ public final class CompanionBrain {
         job.entities.addAll(placed.entities());
         c.cancelAll();
         c.build = job;
-        c.addTask(Task.build());
+        c.queueBuild();
         Component mats = CompanionTexts.buildingMaterials(c);
         Component reply = CompanionTexts.tr("build.schematic", CompanionTexts.buildName(s.name()), s.sizeX(), s.sizeY(), s.sizeZ(), c.build.total(), mats);
         return withAirHint(reply, s, withAir);
@@ -432,6 +445,14 @@ public final class CompanionBrain {
         return CompanionTexts.tr("reply.hunt");
     }
 
+    /** "geh angeln": Angel besorgen, Ufer suchen, simuliert angeln. */
+    public static Component orderFishReply(CompanionEntity c, int catches) {
+        c.cancelAll();
+        int n = FishingRules.catches(catches);
+        c.addTask(Task.fish(n));
+        return CompanionTexts.tr(CompanionFishing.rodSlot(c) >= 0 ? "order.fish" : "order.fish.rod", n);
+    }
+
     public static Component orderSmeltReply(CompanionEntity c) {
         c.cancelAll();
         c.addTask(Task.smeltAnything());
@@ -446,7 +467,7 @@ public final class CompanionBrain {
 
     public static Component orderTidyReply(CompanionEntity c) {
         c.cancelAll();
-        c.queueTidy();
+        c.orders.queueTidy();
         return CompanionTexts.tr(c.getHome() == null ? "order.tidy.owner" : "order.tidy.store");
     }
 
@@ -543,7 +564,7 @@ public final class CompanionBrain {
         if (job == null) return CompanionTexts.tr("build.out_of_world");
         c.cancelAll();
         c.build = job;
-        c.addTask(Task.build());
+        c.queueBuild();
         Component mats = Component.empty();
         if (plan.fill() > 0 && !c.creativeHelper()) {
             var need = CompanionBuilder.remaining(sl, c.build);
@@ -572,8 +593,8 @@ public final class CompanionBrain {
     }
 
     public static Component orderSortReply(ServerPlayer p, CompanionEntity c) {
-        BlockPos center = c.getHome() != null ? c.getHome() : c.findNearestContainer(c.blockPosition(), 24);
-        if (center == null) center = c.findNearestContainer(p.blockPosition(), 24);
+        BlockPos center = c.getHome() != null ? c.getHome() : c.storage.findNearestContainer(c.blockPosition(), 24);
+        if (center == null) center = c.storage.findNearestContainer(p.blockPosition(), 24);
         if (center == null) return CompanionTexts.tr("order.sort.none");
         c.cancelAll();
         if (c.getHome() != null) {
@@ -590,7 +611,7 @@ public final class CompanionBrain {
         ServerLevel sl = p.level();
         if (hit instanceof BlockHitResult bhr && hit.getType() == HitResult.Type.BLOCK
                 && c.containerAt(sl, bhr.getBlockPos()) != null) pos = bhr.getBlockPos();
-        if (pos == null) pos = c.findNearestContainer(p.blockPosition(), 8);
+        if (pos == null) pos = c.storage.findNearestContainer(p.blockPosition(), 8);
         if (pos == null) return CompanionTexts.tr("order.home.look");
         c.setHome(pos);
         return CompanionTexts.tr("order.home.set", pos.toShortString());
@@ -613,28 +634,40 @@ public final class CompanionBrain {
     static void stage(CompanionEntity e, String msg) { stage(e, Component.literal(msg)); }
 
     static void stage(CompanionEntity e, Component msg) {
-        e.noteStage(msg);
+        e.watchdog.noteStage(msg);
         if (!msg.equals(e.stageComponent())) {
             e.setStage(msg);
-            e.tell(msg);
-            e.logInfo(CompanionTexts.tr("log.planner", msg));
+            if (e.mayChatter(msg)) e.tell(msg); // Gesprächigkeit: Planmeldungen sind freiwillig
+            e.logInfo(CompanionTexts.tr("log.planner", msg)); // Diagnose bleibt vollständig
         }
     }
 
-    static final int RODS = 7;    // 14 Lohenstaub -> 14 Enderaugen
     static final int PEARLS = 14; // 12 Rahmen + Augen zum Werfen/Reserve
 
-    /** Fehlt Lohenstaub für die noch fehlenden Enderaugen (12 Rahmen)? */
     static boolean needsBlaze(CompanionEntity e) {
-        if (e.endPortalPos != null) return false;
-        int needEyes = Math.max(0, 12 - CompanionCraft.count(e, "ender_eye"));
-        int powder = CompanionCraft.count(e, "blaze_rod") * 2 + CompanionCraft.count(e, "blaze_powder");
-        return powder < needEyes;
+        return e.endPortalPos == null && rawBlazeTarget(e) > CompanionCraft.count(e, "blaze_rod");
+    }
+
+    /** Ruten für die Enderaugen. Beim Lohenkampf selbst nimmt er zwei mehr mit (Braustand, Lohenstaub), siehe netherPlan. */
+    static int eyeRodTarget(CompanionEntity e) { return rawBlazeTarget(e); }
+
+    static int rawBlazeTarget(CompanionEntity e) {
+        int rods = CompanionCraft.count(e, "blaze_rod");
+        int need = PEARLS - CompanionCraft.count(e, "ender_eye") - CompanionCraft.count(e, "blaze_powder") - rods * 2;
+        return rods + (Math.max(0, need) + 1) / 2;
     }
 
     static final int ARROWS = 32;
 
-    static boolean dragonDefeated(CompanionEntity e) {
+    /** Wie oft er in dieser Dimension schon gestorben ist (aus den gemerkten Todesorten, übersteht den Tod). */
+    static int deathsIn(CompanionEntity e, net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension) {
+        String id = dimension.identifier().toString();
+        int n = 0;
+        for (var p : e.memory.all()) if (p.kind == CompanionMemory.Kind.DEATH && id.equals(p.dim)) n += Math.max(1, p.count);
+        return n;
+    }
+
+    public static boolean dragonDefeated(CompanionEntity e) {
         var server = e.level().getServer();
         if (server == null) return false;
         ServerLevel end = server.getLevel(net.minecraft.world.level.Level.END);
@@ -651,7 +684,7 @@ public final class CompanionBrain {
             return;
         }
         boolean bow = CompanionCraft.owns(e, "bow") && CompanionCraft.count(e, "arrow") > 0;
-        if (bow && !e.endCrystals(160).isEmpty() && e.crystalRounds < 3) {
+        if (bow && !e.expedition.endCrystals(160).isEmpty() && e.crystalRounds < 3) {
             e.crystalRounds++;
             stage(e, CompanionTexts.tr("planner.stage.crystals"));
             e.addTask(Task.crystals());
@@ -672,7 +705,7 @@ public final class CompanionBrain {
     /** Bereit für die Enderman-Jagd: Portal steht, Lohenruten da, Rüstung an, noch zu wenig Perlen. */
     static boolean wantsPearlHunt(CompanionEntity e) {
         return e.getPortalPos() != null && e.endPortalPos == null && !needsBlaze(e) && pearlsAndEyes(e) < PEARLS
-                && CompanionCraft.owns(e, "iron_chestplate");
+                && CompanionJobs.pieceTier(e, "chestplate") >= 3;
     }
 
     /**
@@ -680,13 +713,14 @@ public final class CompanionBrain {
      * Ohne Ausflug: beim Besitzer bleiben.
      */
     static void netherPlan(CompanionEntity e) {
-        if (e.netherPortal == null) e.netherPortal = e.nearestPortal(8); // Ankunftsportal merken
+        if (e.netherPortal == null) e.netherPortal = e.portals.nearest(8); // Ankunftsportal merken
         if (!e.netherTrip) {
             stage(e, CompanionTexts.tr("planner.stage.stay_owner"));
             e.plannerCooldownUntil = e.tickCount + 200;
             return;
         }
-        if (blazeRods(e) >= RODS) {
+        if (!needsBlaze(e)) {
+            if (netherExtras(e)) return; // auf dem Rückweg noch Netherwarzen/Magmacreme fürs Brauen mitnehmen
             stage(e, CompanionTexts.tr("planner.stage.return_portal", blazeRods(e)));
             if (e.netherPortal == null) {
                 e.problem(dev.begleiter.debug.BotDebug.EventKind.PORTAL, CompanionTexts.tr("log.problem.portal_lost"));
@@ -698,30 +732,125 @@ public final class CompanionBrain {
             return;
         }
         if (e.fortressPos == null) {
-            e.fortressPos = e.locateFortress();
+            e.fortressPos = e.expedition.locateFortress();
             if (e.fortressPos == null) {
                 e.problem(CompanionTexts.tr("log.problem.no_fortress"));
                 e.netherTrip = false;
                 return;
             }
-            e.tell(CompanionTexts.tr("planner.stage.fortress_found", e.fortressPos.toShortString()));
+            Component found = CompanionTexts.tr("planner.stage.fortress_found", e.fortressPos.toShortString());
+            if (e.mayChatter(found)) e.tell(found); // freiwillige Planmeldung wie die übrigen Stufen
         }
-        BlockPos spawner = e.nearestSpawner(24);
-        if (spawner == null) spawner = e.nearestLoadedSpawner(96);
+        BlockPos spawner = e.expedition.nearestSpawner(24);
+        if (spawner == null) spawner = e.expedition.nearestLoadedSpawner(96);
+        if (spawner != null) e.blazeSpawnerPos = spawner; // diese Festung merken (er verwarf sie und zog 850 Blöcke weit)
         double dx = e.fortressPos.getX() - e.getX(), dz = e.fortressPos.getZ() - e.getZ();
         if (spawner == null && dx * dx + dz * dz > 40 * 40) {
             stage(e, CompanionTexts.tr("planner.stage.travel_fortress"));
             e.addTask(Task.travel(e.fortressPos));
             return;
         }
-        stage(e, CompanionTexts.tr("planner.stage.fight_blazes", blazeRods(e), RODS));
-        e.addTask(Task.fight(spawner, "blaze", null, RODS));
+        if (netherExtras(e)) return;
+        // Schon am Spawner: zwei Ruten mehr für Braustand und Lohenstaub (Tränke), solange er keinen Braustand hat
+        int target = rawBlazeTarget(e) + (e.potions.hasStand() ? 0 : 2);
+        stage(e, CompanionTexts.tr("planner.stage.fight_blazes", CompanionCraft.count(e, "blaze_rod"), target));
+        e.addTask(Task.fight(spawner, "blaze", null, target));
+    }
+
+    /** Netherwarzen ernten, die er in der Festung gesehen hat, höchstens alle 30 s neu gesucht. */
+    private static final int WART_WANT = 4;
+
+    /**
+     * Zutaten fürs Brauen, wo sie wachsen: reife Netherwarzen in der Festung (Umkreis 24) und Magmacreme von
+     * Magmawürfeln in der Nähe (für Feuerresistenz). true = Aufgaben eingeplant.
+     */
+    static boolean netherExtras(CompanionEntity e) {
+        if (!(e.level() instanceof ServerLevel sl) || e.getHealth() < 12) return false;
+        if (e.tickCount < e.potions.extrasUntil) return false;
+        e.potions.extrasUntil = e.tickCount + 600;
+        if (CompanionCraft.count(e, "nether_wart") < WART_WANT) {
+            BlockPos c = e.blockPosition();
+            BlockPos[] best = {null};
+            dev.begleiter.world.SectionScanner.scanBox(sl, c.offset(-24, -8, -24), c.offset(24, 8, 24),
+                    state -> state.is(net.minecraft.world.level.block.Blocks.NETHER_WART)
+                            && state.getValue(net.minecraft.world.level.block.NetherWartBlock.AGE) >= 3,
+                    (x, y, z, state) -> {
+                        var p = new BlockPos(x, y, z);
+                        if ((best[0] == null || p.distSqr(c) < best[0].distSqr(c)) && !e.memory.dangerous(sl, p, 3)) best[0] = p;
+                        return true;
+                    });
+            if (best[0] != null) {
+                stage(e, CompanionTexts.tr("planner.stage.nether_wart"));
+                e.addTask(Task.breakAt(best[0], net.minecraft.world.level.block.Blocks.NETHER_WART));
+                e.addTask(Task.collect(false));
+                return true;
+            }
+        }
+        boolean wantCream = CompanionCraft.count(e, "magma_cream") + CompanionCraft.count(e, "slime_ball") < 1
+                && e.potions.count(CompanionPotions.Kind.FIRE) < 3 && !CompanionBrain.dragonDefeated(e);
+        if (wantCream && e.getHealth() >= 16) {
+            var cube = sl.getEntitiesOfClass(net.minecraft.world.entity.monster.cubemob.MagmaCube.class, e.getBoundingBox().inflate(20),
+                    m -> m.isAlive() && m.getSize() > 1).stream().min(java.util.Comparator.comparingDouble(e::distanceToSqr)).orElse(null);
+            if (cube != null) {
+                stage(e, CompanionTexts.tr("planner.stage.magma_cream"));
+                e.addTask(Task.fight(null, "magma_cube", "magma_cream", 1));
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
      * Nachts an der Oberfläche: ins Haus gehen und die Türöffnung zumauern; morgens wieder öffnen.
      * true = Planer ist für diesen Durchlauf fertig.
      */
+    /** Notfalls Planken oder Stämme aus dem Inventar, um nachts die Türlücke zu schließen. */
+    private static Item doorPlug(CompanionEntity e) {
+        for (int i = 0; i < e.getInventory().getContainerSize(); i++) {
+            ItemStack s = e.getInventory().getItem(i);
+            if (!s.isEmpty() && s.getItem() instanceof net.minecraft.world.item.BlockItem
+                    && (s.is(net.minecraft.tags.ItemTags.PLANKS) || s.is(net.minecraft.tags.ItemTags.LOGS))) return s.getItem();
+        }
+        return null;
+    }
+
+    /** Nachts kein heiles Haus in 48 Blöcken: dann schützt nur ein Nachtlager an Ort und Stelle (unter Tage nicht nötig). */
+    static boolean needsNightCamp(CompanionEntity e, ServerLevel world) {
+        if (!world.isDarkOutside() || !e.inOverworld()) return false;
+        BlockPos inside = e.houseInside();
+        if (e.isHouseBuilt() && inside != null && !e.houseDamaged(world) && inside.distSqr(e.blockPosition()) <= 48 * 48)
+            return false;
+        BlockPos at = e.blockPosition();
+        return world.canSeeSky(at) || at.getY() >= world.getSeaLevel() - 8;
+    }
+
+    /**
+     * Nachtlager wie ein Spieler: einmauern bis zum Morgen; ohne Blöcke zwei Blöcke tief eingraben, der Aushub
+     * schließt danach das Loch über dem Kopf. false = hier nicht möglich.
+     */
+    static boolean nightCamp(CompanionEntity e, ServerLevel world) {
+        if (e.sealInUntilMorning(world)) return true;
+        BlockPos at = e.blockPosition();
+        if (e.scaffoldCount() < 9 && e.onGround() && diggable(e, world, at.below()) && diggable(e, world, at.below(2))
+                && !world.getBlockState(at.below(3)).getCollisionShape(world, at.below(3)).isEmpty()) {
+            e.addTask(Task.breakAt(at.below(), null));
+            e.addTask(Task.breakAt(at.below(2), null));
+            return true;
+        }
+        return false;
+    }
+
+    /** Gewachsener Boden, den er mit der Hand oder Spitzhacke wegbekommt (kein Fluid, nichts Unzerstörbares). */
+    private static boolean diggable(CompanionEntity e, ServerLevel world, BlockPos p) {
+        var state = world.getBlockState(p);
+        // Stein ohne Spitzhacke geht nicht (beobachtet: stand mit 6 Leben untätig draußen, "falsches Werkzeug")
+        if (state.requiresCorrectToolForDrops() && CompanionCraft.tier(e, "pickaxe") < 1) return false;
+        for (var d : net.minecraft.core.Direction.values()) // Abbau lässt sonst Wasser herein (Abbau-Auftrag lehnt ab)
+            if (!world.getFluidState(p.relative(d)).isEmpty()) return false;
+        return !state.isAir() && state.getFluidState().isEmpty() && state.getDestroySpeed(world, p) >= 0
+                && state.getDestroySpeed(world, p) < 3 && world.getFluidState(p.below()).isEmpty();
+    }
+
     static boolean nightStep(CompanionEntity e, int pick) {
         BlockPos inside = e.houseInside();
         if (inside == null || !(e.level() instanceof ServerLevel sl)) return false;
@@ -730,7 +859,11 @@ public final class CompanionBrain {
         BlockPos doorAt = e.houseDoor().getFirst();
         boolean realDoor = CompanionDoors.isDoor(sl, doorAt);
         if (!night) {
-            if (e.doorClosed) {
+            // Zugemauerte Türöffnung ohne gemerkten Zustand (nach Neuladen oder Tod): er kam danach weder aus dem
+            // Haus raus noch abends wieder rein und brach jedes Mal durch die Wand
+            boolean plugged = !realDoor && e.houseDoor().stream().anyMatch(p -> !sl.getBlockState(p).isAir()
+                    && !sl.getBlockState(p).getCollisionShape(sl, p).isEmpty());
+            if (e.doorClosed || plugged) {
                 e.doorClosed = false;
                 if (realDoor) { stage(e, CompanionTexts.tr("planner.stage.good_morning")); return false; } // die Tür öffnet er einfach beim Rausgehen
                 stage(e, CompanionTexts.tr("planner.stage.good_morning_open"));
@@ -744,6 +877,9 @@ public final class CompanionBrain {
         boolean underground = !sl.canSeeSky(e.blockPosition()) && e.blockPosition().getY() < inside.getY() - 6;
         if (underground) return false;
         if (!e.isInsideHouse()) {
+            // Zu weit für den Heimweg in der Dämmerung (beobachtet: 120 Blöcke gerannt, kurz vor der Tür vom Creeper
+            // erwischt): dann lieber ein Nachtlager an Ort und Stelle (needsNightCamp/nightCamp)
+            if (inside.distSqr(e.blockPosition()) > 64 * 64) return false;
             stage(e, CompanionTexts.tr("planner.stage.night_home"));
             e.addTask(Task.moveTo(inside, 1));
             return true;
@@ -761,6 +897,7 @@ public final class CompanionBrain {
             return true;
         }
         Item block = e.scaffoldItem();
+        if (block == null) block = doorPlug(e); // ohne Müll-Blöcke: Planken oder Stämme, besser als eine offene Lücke
         if (!e.doorClosed && block != null) {
             stage(e, CompanionTexts.tr("planner.stage.close_door"));
             for (BlockPos p : e.houseDoor())
@@ -768,8 +905,10 @@ public final class CompanionBrain {
             e.doorClosed = true;
             return true;
         }
+        // Statt nur zu warten: Hausarbeit (kochen, reparieren, Fackeln, einlagern, sortieren)
+        if (e.initiative.nightChore(sl)) return true;
         stage(e, CompanionTexts.tr("planner.stage.wait_day"));
-        e.noteWaiting();
+        e.watchdog.noteWaiting();
         e.plannerCooldownUntil = e.tickCount + 200;
         return true;
     }
@@ -789,6 +928,8 @@ public final class CompanionBrain {
             return;
         }
 
+        if (e.level() instanceof ServerLevel world && e.journey.plan(world)) return;
+
         // End: Kristalle und Drache. Nether: eigener Ausflug (Lohenruten) – sonst beim Besitzer bleiben
         if (e.level().dimension() == net.minecraft.world.level.Level.END) {
             endPlan(e);
@@ -798,7 +939,7 @@ public final class CompanionBrain {
             netherPlan(e);
             return;
         }
-        if (e.netherTrip && blazeRods(e) >= RODS) {
+        if (e.netherTrip && !needsBlaze(e)) {
             e.netherTrip = false;
             stage(e, CompanionTexts.tr("planner.stage.return_nether", blazeRods(e)));
         }

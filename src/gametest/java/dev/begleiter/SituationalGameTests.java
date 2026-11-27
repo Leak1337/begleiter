@@ -31,7 +31,7 @@ public class SituationalGameTests {
         c.stay();
         c.getInventory().clearContent();
         c.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
-        c.hunger = 20;
+        c.food.set(20);
         c.giveToInventory(new ItemStack(Items.DIAMOND_PICKAXE));
         c.giveToInventory(new ItemStack(Items.DIAMOND_AXE));
         c.memory.clear();
@@ -129,14 +129,14 @@ public class SituationalGameTests {
     public void aktivierterModusAendertRankingUndTatsaechlichenSammelauftrag(GameTestHelper h) {
         CompanionEntity c = companion(h);
         knownSources(h, c);
-        c.scaffold.add(c.blockPosition().offset(100, 0, 0));
+        c.scaffolding.remember(c.blockPosition().offset(100, 0, 0));
         var order = new Score(Need.ORDER, 40, "Geruest");
         var supply = new Score(Need.SUPPLY, 40, "Vorrat");
         var legacy = List.of(order, supply);
         var ranked = CompanionDecisionEngine.rank(c, legacy);
         h.assertTrue(ranked.getFirst().need() == (CompanionDecisionEngine.enabled() ? Need.SUPPLY : Need.ORDER),
                 "Ranking passt nicht zum Aktivierungsmodus");
-        c.scaffold.clear();
+        c.scaffolding.clear();
         CompanionNeeds.act(c, supply);
         String expected = CompanionDecisionEngine.enabled() ? Resources.COAL.key() : Resources.WOOD.key();
         h.assertTrue(c.currentTask() != null && c.currentTask().spec() instanceof dev.begleiter.task.TaskSpec.ResourceGoal g
@@ -149,7 +149,7 @@ public class SituationalGameTests {
     public void geschuetzteBeduerfnisseBleibenBarrieren(GameTestHelper h) {
         CompanionEntity c = companion(h);
         knownSources(h, c);
-        c.scaffold.add(c.blockPosition().offset(100, 0, 0));
+        c.scaffolding.remember(c.blockPosition().offset(100, 0, 0));
         var ranked = List.of(new Score(Need.ORDER, 42, "Ordnung"), new Score(Need.SURVIVAL, 41, "Schutz"),
                 new Score(Need.SUPPLY, 40, "Vorrat"));
         h.assertTrue(CompanionDecisionEngine.rank(c, ranked).equals(ranked), "Situationsbewertung ueberspringt geschuetztes Ziel");

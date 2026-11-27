@@ -129,6 +129,12 @@ public final class TaskQueueCodec {
     /** Pflichtangabe, die dem Record fehlt (Position, Block, Parameter); null = vollständig. */
     private static Component missing(TaskSpec spec) {
         if (NEEDS_POS.contains(spec.type()) && spec.pos() == null) return CompanionTexts.tr("queue.required.position");
+        if (spec instanceof TaskSpec.MoveTo move && move.portal() != null
+                && (move.stockReturn() || !Set.of("minecraft:nether_portal", "minecraft:end_portal").contains(move.portal())))
+            return CompanionTexts.tr("queue.required.parameter");
+        if (spec instanceof TaskSpec.Farm farm && ((farm.forage() || farm.plantBerries()) && farm.pos() == null
+                || farm.forage() && farm.plantBerries()))
+            return CompanionTexts.tr("queue.required.position");
         if (NEEDS_BLOCK.contains(spec.type()) && spec.block() == null) return CompanionTexts.tr("queue.required.block");
         String required = switch (spec) {
             case TaskSpec.ResourceGoal g -> g.resource();
@@ -170,9 +176,12 @@ public final class TaskQueueCodec {
                     || BuiltInRegistries.ITEM.getValue(id) == net.minecraft.world.item.Items.AIR)
                 return CompanionTexts.tr("queue.required.item_id");
         }
-        if (spec instanceof TaskSpec.Request r && (r.count() <= 0 || r.phase() > 4
+        if (spec instanceof TaskSpec.Request r && (r.count() <= 0 || r.phase() < 0 || r.phase() > 6
                 || r.excludedSource() != null && r.phase() != 4
-                || r.phase() == 0 && r.count() > dev.begleiter.chat.ChatCount.MAX))
+                || r.homeOrder() != (r.pos() != null)
+                || r.homeOrder() && r.materials()
+                || r.fuel() != null && (!r.homeOrder() || !Set.of("minecraft:coal", "minecraft:charcoal").contains(r.fuel()))
+                || (r.phase() == 0 || r.homeOrder()) && r.count() > dev.begleiter.chat.ChatCount.MAX))
             return CompanionTexts.tr("queue.required.parameter");
         if (spec instanceof TaskSpec.Process p && (p.count() <= 0 || p.count() > dev.begleiter.CompanionRecipes.MAX_PROCESSING_BATCH
                 || RegistryIds.parse(p.recipe()) == null)) return CompanionTexts.tr("queue.required.parameter");
@@ -294,6 +303,7 @@ public final class TaskQueueCodec {
             case SMELT -> new TaskSpec.Smelt(arg, n);
             case STATION -> new TaskSpec.Station(arg, n == 1);
             case REPAIR -> new TaskSpec.Repair(n);
+            case BREW -> new TaskSpec.Brew(arg, n);
             case GEARUP -> TaskSpec.GearUp.parse(arg, n);
             case DOOR -> new TaskSpec.Door(pos, arg);
             case GATHER -> new TaskSpec.Gather(arg, n);
@@ -307,6 +317,7 @@ public final class TaskQueueCodec {
             case FIGHT -> TaskSpec.Fight.parse(pos, arg, n);
             case CRYSTALS -> new TaskSpec.Crystals();
             case BREED -> new TaskSpec.Breed(arg, n);
+            case FISH -> new TaskSpec.Fish(pos, n);
             case FARM -> new TaskSpec.Farm(pos);
             case TRADE -> new TaskSpec.Trade(arg != null && arg.isEmpty() ? null : arg, n);
             case BUILD -> new TaskSpec.Build();

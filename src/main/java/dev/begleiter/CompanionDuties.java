@@ -181,16 +181,22 @@ public final class CompanionDuties {
     }
 
     public static BlockPos wanderTarget(CompanionEntity c, ServerLevel sl, CompanionZones.Zone zone) {
+        BlockPos best = null;
+        double bestCost = Double.POSITIVE_INFINITY;
         for (int i = 0; i < 24; i++) {
             int x = zone.min().getX() + c.getRandom().nextInt(zone.max().getX() - zone.min().getX() + 1);
             int z = zone.min().getZ() + c.getRandom().nextInt(zone.max().getZ() - zone.min().getZ() + 1);
             for (int y = zone.max().getY() - 1; y > zone.min().getY(); y--) {
                 BlockPos pos = new BlockPos(x, y, z);
                 if (pos.distSqr(c.blockPosition()) < 4 || !sl.hasChunkAt(pos)) continue;
-                if (CompanionSafeTeleport.safe(c, sl, net.minecraft.world.phys.Vec3.atBottomCenterOf(pos))) return pos;
+                double cost = c.work.explorationCost(sl, pos);
+                if (cost >= bestCost || !CompanionSafeTeleport.safe(c, sl, net.minecraft.world.phys.Vec3.atBottomCenterOf(pos))) continue;
+                if (cost == 0) return pos;
+                best = pos;
+                bestCost = cost;
             }
         }
-        return null;
+        return best;
     }
 
     /** Tiere zur sicheren Stelle möglichst weit im Inneren führen, statt am Zonenrand stehen zu bleiben. */
@@ -223,7 +229,7 @@ public final class CompanionDuties {
         if (!c.hasFreeSlot() || c.tickCount < c.collectBlockedUntil) return false;
         var zone = CompanionZones.work(c, kind);
         var bounds = zone == null ? new net.minecraft.world.phys.AABB(at).inflate(12) : zone.bounds();
-        if (sl.getEntitiesOfClass(ItemEntity.class, bounds, item -> c.collectible(item)
+        if (sl.getEntitiesOfClass(ItemEntity.class, bounds, item -> c.pickup.collectible(item)
                 && CompanionZones.allows(c, kind, item.blockPosition())).isEmpty()) return false;
         c.addTask(Task.collect(true));
         return true;
@@ -241,11 +247,97 @@ public final class CompanionDuties {
         return wander(c, sl, c.zones.get(CompanionZones.Kind.BASE, sl));
     }
 
+    /** Prepare one bounded turn. The work scheduler owns the retry and reports the outcome. */
+    static CompanionWork.State planManaged(CompanionEntity c, ServerLevel world, CompanionWork.Kind kind,
+                                          CompanionZones.Zone zone, int limit) {
+        BlockPos at = zone.center();
+        if (!world.hasChunkAt(at)) return CompanionWork.State.AREA;
+        if (c.memory.dangerous(world, at, 5)) return CompanionWork.State.DANGER;
+        switch (kind) {
+            case FARM -> {
+                if (!c.hasFreeSlot()) return CompanionWork.State.MATERIAL;
+                if (CompanionJobs.nextFarmTarget(world, c, at, java.util.Set.of()) == null) {
+                    if (CompanionJobs.seedSlot(c, null) >= 0 || !hasUnplanted(world, zone)) return CompanionWork.State.IDLE;
+                    if (!c.work.queueSupply(world, stack -> CompanionJobs.SEED_FOR.containsValue(CompanionJobs.id(stack.getItem())),
+                            1, limit)) return CompanionWork.State.MATERIAL;
+                }
+                c.addTask(Task.farm(at));
+            }
+            case ANIMALS -> {
+                boolean ready = false;
+                for (String species : SPECIES) {
+                    var herd = CompanionJobs.animals(world, at, 48, species).stream()
+                            .filter(a -> zone.contains(a.blockPosition())).toList();
+                    long adults = herd.stream().filter(a -> !a.isBaby()).count();
+                    if (adults < 2 || adults >= CompanionJobs.HERD_MAX) continue;
+                    var candidates = herd.stream().filter(CompanionJobs::breedable).toList();
+                    if (candidates.size() < 2) continue;
+                    ready = true;
+                    int pairs = Math.min(limit / 2, candidates.size() / 2);
+                    var animal = candidates.getFirst();
+                    var portions = new java.util.HashMap<net.minecraft.world.item.Item, Integer>();
+                    for (int slot = 0; slot < c.getInventory().getContainerSize(); slot++) {
+                        var stack = c.getInventory().getItem(slot);
+                        if (animal.isFood(stack)) portions.merge(stack.getItem(), stack.getCount(), Integer::sum);
+                    }
+                    int carried = portions.entrySet().stream().mapToInt(food ->
+                            Math.min(food.getValue(), c.work.inputAllowance(food.getKey()))).sum();
+                    int gap = 2 - carried;
+                    if (gap > 0 && portions.values().stream().mapToInt(Integer::intValue).sum() >= 2)
+                        portions.forEach(c.work::permitsInput);
+                    if (gap > 0 && !c.work.queueSupply(world, animal::isFood, gap, pairs * 2 - carried)) continue;
+                    c.addTask(Task.breed(species, pairs));
+                    return null;
+                }
+                if (collect(c, world, at, CompanionZones.Kind.ANIMALS)) return null;
+                return ready ? CompanionWork.State.MATERIAL : CompanionWork.State.IDLE;
+            }
+            case STORAGE -> {
+                if (c.storageBoxes(world, at).isEmpty()) return CompanionWork.State.HOME;
+                storage(c, world, at);
+                if (!c.hasTasks()) return CompanionWork.State.IDLE;
+            }
+            case EXPLORE -> {
+                BlockPos target = wanderTarget(c, world, zone);
+                if (target == null) return CompanionWork.State.IDLE;
+                c.addTask(Task.moveTo(target, 1));
+            }
+            case TRADE -> {
+                boolean hasVillagers = false;
+                var villagers = world.getEntitiesOfClass(net.minecraft.world.entity.npc.villager.Villager.class,
+                        zone.bounds(), v -> v.isAlive() && !v.isBaby() && zone.contains(v.blockPosition()));
+                villagers.sort(java.util.Comparator.comparingDouble(c::distanceToSqr));
+                for (var villager : villagers) {
+                    hasVillagers = true;
+                    if (CompanionJobs.findOffer(c, villager, null) != null) {
+                        if (c.distanceToSqr(villager) > 20 * 20) c.addTask(Task.moveTo(villager.blockPosition(), 25));
+                        c.addTask(Task.trade(null, limit));
+                        return null;
+                    }
+                }
+                return hasVillagers ? CompanionWork.State.MATERIAL : CompanionWork.State.IDLE;
+            }
+            default -> throw new IllegalArgumentException(kind.name());
+        }
+        return null;
+    }
+
+    private static boolean hasUnplanted(ServerLevel world, CompanionZones.Zone zone) {
+        return !dev.begleiter.world.SectionScanner.scanBox(world, zone.min(), zone.max(),
+                state -> state.is(net.minecraft.world.level.block.Blocks.FARMLAND), (x, y, z, state) -> {
+                    var crop = new BlockPos(x, y + 1, z);
+                    var above = dev.begleiter.world.SafeLevel.state(world, crop);
+                    return !zone.contains(crop) || above == null || !above.isAir();
+                }).completed();
+    }
+
     public static long storageFingerprint(CompanionEntity c, ServerLevel sl, BlockPos at) {
         long result = 1;
         for (BlockPos pos : c.storageBoxes(sl, at)) {
+            if (c.storage.protectedStockStorage(sl, pos)) continue;
             result = result * 31 + pos.asLong();
             var box = c.containerAt(sl, pos);
+            if (box == null) continue;
             for (int i = 0; i < box.getContainerSize(); i++) {
                 var s = box.getItem(i);
                 result = result * 31 + s.getItem().hashCode();
@@ -259,11 +351,12 @@ public final class CompanionDuties {
     private static int storage(CompanionEntity c, ServerLevel sl, BlockPos at) {
         var boxes = c.storageBoxes(sl, at);
         if (boxes.isEmpty()) return 600;
-        if (c.hasDepositable() && c.tickCount >= c.storageFullUntil) { c.addTask(Task.deliver(true)); return 600; }
+        if (c.items.hasDepositable() && c.tickCount >= c.storageFullUntil) { c.addTask(Task.deliver(true)); return 600; }
         long fingerprint = storageFingerprint(c, sl, at);
-        if (fingerprint != c.dutyStorageFingerprint) {
+        var sortTarget = boxes.stream().filter(pos -> !c.storage.protectedStockStorage(sl, pos)).findFirst();
+        if (sortTarget.isPresent() && fingerprint != c.dutyStorageFingerprint) {
             c.dutyStorageFingerprint = fingerprint;
-            c.addTask(Task.sort(boxes.getFirst()));
+            c.addTask(Task.sort(sortTarget.get()));
             return 1200;
         }
         collect(c, sl, at, CompanionZones.Kind.STORAGE);

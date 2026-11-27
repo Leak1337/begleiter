@@ -59,15 +59,11 @@ public final class ServerLifecycleClientTest implements FabricClientGameTest {
         if (CompanionRecipes.craftsFor(level, Items.STICK).isEmpty()
                 || CompanionRecipes.smeltsFor(level, Items.IRON_INGOT).isEmpty())
             throw new AssertionError("Rezeptcache wurde nicht aufgebaut");
+        // Der Planer hält keinen statischen Zustand mehr (PlanContext je Aufruf, siehe PlanContextGameTests);
+        // hier nur prüfen, dass er nach dem Rezeptaufbau weiter plant.
         if (CompanionPlanner.obtain(c, Items.IRON_PICKAXE, 1) == null
-                || get(CompanionPlanner.class, "hasTable") == null)
-            throw new AssertionError("Normaler Planerzustand wurde nicht aufgebaut");
-        if (CompanionPlanner.obtainPrepared(c, Items.IRON_PICKAXE, 1, CompanionPlanner.RoutePolicy.ANY) == null
-                || map(CompanionPlanner.class, "stations").isEmpty())
-            throw new AssertionError("Vorbereiteter Planerzustand wurde nicht aufgebaut");
-        // Alle Aufruf-Caches gleichzeitig belegen, unabhängig von Stationen am Test-Spawn.
-        map(CompanionPlanner.class, "chestCache").put(Items.STICK, java.util.Optional.of(player.blockPosition()));
-        set(CompanionPlanner.class, "hasTable", Boolean.FALSE);
+                || CompanionPlanner.obtainPrepared(c, Items.IRON_PICKAXE, 1, CompanionPlanner.RoutePolicy.ANY) == null)
+            throw new AssertionError("Planer plant nicht");
 
         // Kein Arena-Weltumbau: nur die Referenzen einer noch wartenden Vorführung vorbereiten.
         set(ParkourCourse.class, "origin", player.blockPosition());
@@ -90,10 +86,6 @@ public final class ServerLifecycleClientTest implements FabricClientGameTest {
                 && get(CompanionRecipes.class, "crafts") == null
                 && get(CompanionRecipes.class, "smelts") == null
                 && get(CompanionRecipes.class, "smeltsAll") == null
-                && map(CompanionPlanner.class, "chestCache").isEmpty()
-                && map(CompanionPlanner.class, "stations").isEmpty()
-                && get(CompanionPlanner.class, "hasTable") == null
-                && ((Integer) get(CompanionPlanner.class, "budget")) == 0
                 && get(ParkourCourse.class, "origin") == null
                 && get(ParkourCourse.class, "originLevel") == null
                 && get(ParkourCourse.class, "show") == null

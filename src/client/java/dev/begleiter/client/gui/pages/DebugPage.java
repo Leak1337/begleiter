@@ -32,7 +32,7 @@ public final class DebugPage implements ControlPage {
 
     @Override public void render(CompanionScreen s, GuiGraphicsExtractor g, int mx, int my) {
         var data = s.data();
-        s.text(g, s.tr("gui.begleiter.debug.heading"), 110, 45, 188, ControlTheme.MUTED);
+        s.heading(g, s.tr("gui.begleiter.debug.heading"), 108, 44, 194);
         s.text(g, s.tr("gui.begleiter.debug.vanilla"), 110, 66, 120, ControlTheme.TEXT);
         s.text(g, s.tr("gui.begleiter.debug.active"), 232, 66, 66, ControlTheme.ACCENT);
         s.text(g, s.tr("gui.begleiter.debug.intelligence"), 110, 86, 120, ControlTheme.TEXT);

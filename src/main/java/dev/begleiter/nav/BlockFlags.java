@@ -60,6 +60,7 @@ public final class BlockFlags {
     public static final int PORTAL = 1 << 17;
     /** Wasser ohne Kollision (Wasser, Seegras, Kelp) – hier kann man schwimmen; geflutete Stufen/Zäune nicht. */
     public static final int SWIM = 1 << 18;
+    public static final int END_PORTAL = 1 << 19;
 
     public static final int LIQUID = WATER | LAVA;
     private static final int COMPUTED = 1 << 30;
@@ -93,6 +94,7 @@ public final class BlockFlags {
 
         // Netherportal: nur betreten, wenn es das Ziel ist (sonst landet er aus Versehen im Nether)
         if (s.is(Blocks.NETHER_PORTAL)) return f | PORTAL;
+        if (s.is(Blocks.END_PORTAL)) return f | END_PORTAL;
         boolean noCollision = s.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
         if (has(f, WATER) && noCollision) f |= SWIM;
         boolean thin = s.getBlock() instanceof CarpetBlock
@@ -142,12 +144,15 @@ public final class BlockFlags {
                 || s.is(Blocks.COBBLESTONE) || s.is(Blocks.COBBLED_DEEPSLATE) || s.is(Blocks.CLAY) || s.is(Blocks.SNOW_BLOCK)
                 || s.is(Blocks.SNOW) || s.is(BlockTags.TERRACOTTA) || s.is(Blocks.SANDSTONE) || s.is(Blocks.RED_SANDSTONE)
                 || s.is(Blocks.CALCITE) || s.is(Blocks.SOUL_SAND) || s.is(Blocks.SOUL_SOIL) || s.is(Blocks.END_STONE)
-                || s.is(BlockTags.NYLIUM) || s.is(BlockTags.ORES) || s.is(Blocks.DRIPSTONE_BLOCK);
+                || s.is(BlockTags.NYLIUM) || s.is(BlockTags.ORES) || s.is(Blocks.DRIPSTONE_BLOCK)
+                || s.is(Blocks.PACKED_ICE) || s.is(Blocks.BLUE_ICE); // Eisberge: schmelzen nicht zu Wasser
     }
 
     private static boolean strongholdBlock(BlockState s) {
         return s.is(Blocks.STONE_BRICKS) || s.is(Blocks.MOSSY_STONE_BRICKS) || s.is(Blocks.CRACKED_STONE_BRICKS)
                 || s.is(Blocks.CHISELED_STONE_BRICKS) || s.is(Blocks.OAK_PLANKS) || s.is(Blocks.IRON_BARS)
-                || s.is(Blocks.STONE_BRICK_STAIRS) || s.is(Blocks.STONE_BRICK_SLAB) || s.is(Blocks.SMOOTH_STONE_SLAB);
+                || s.is(Blocks.STONE_BRICK_STAIRS) || s.is(Blocks.STONE_BRICK_SLAB) || s.is(Blocks.SMOOTH_STONE_SLAB)
+                || s.is(Blocks.NETHER_BRICKS) || s.is(Blocks.NETHER_BRICK_FENCE) || s.is(Blocks.NETHER_BRICK_STAIRS)
+                || s.is(Blocks.NETHER_BRICK_SLAB); // Netherfestung (nur auf dem Lohenausflug)
     }
 }

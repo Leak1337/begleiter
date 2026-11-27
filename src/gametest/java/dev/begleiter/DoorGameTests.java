@@ -81,7 +81,9 @@ public class DoorGameTests {
         h.succeedWhen(() -> {
             h.assertTrue(CompanionDoors.isDoor(h.getLevel(), at), "Keine Tür eingesetzt");
             h.assertTrue(c.currentTask() == null, "Aufgabe läuft noch");
-            h.assertValueEqual(CompanionCraft.count(c, "oak_door"), 2, "Restliche Türen (3 hergestellt, 1 gesetzt)");
+            // aus Birkenbrettern entstehen Birkentüren, keine Eichentüren aus fremdem Holz
+            h.assertValueEqual(CompanionCraft.count(c, "birch_door"), 2, "Restliche Türen (3 hergestellt, 1 gesetzt)");
+            h.assertValueEqual(CompanionCraft.count(c, "oak_door"), 0, "Eichentüren aus Birkenholz");
         });
     }
 

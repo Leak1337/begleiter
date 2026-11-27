@@ -45,7 +45,7 @@ public class CompanionFollowGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        if (mob.isStaying() || mob.hasTasks() || mob.isPaused() || mob.getTarget() != null || mob.isRetreating()) return false;
+        if (mob.journey.active() || mob.work.enabled() || mob.isStaying() || mob.hasTasks() || mob.isPaused() || mob.getTarget() != null || mob.isRetreating()) return false;
         Vec3 t = target();
         double s = startDist();
         return t != null && mob.position().distanceToSqr(t) > s * s;
@@ -53,7 +53,7 @@ public class CompanionFollowGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
-        if (mob.isStaying() || mob.hasTasks() || mob.isPaused() || mob.getTarget() != null || mob.isRetreating()) return false;
+        if (mob.journey.active() || mob.work.enabled() || mob.isStaying() || mob.hasTasks() || mob.isPaused() || mob.getTarget() != null || mob.isRetreating()) return false;
         Vec3 t = target();
         double s = stopDist();
         return t != null && mob.position().distanceToSqr(t) > s * s;

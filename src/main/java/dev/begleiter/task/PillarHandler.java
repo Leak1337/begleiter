@@ -35,9 +35,9 @@ final class PillarHandler implements TaskHandler {
                     task.retry()));
             return Status.REPLACED;
         }
-        if (r == 2 && mob.pillarObstacle != null && task.tries() < 3) {
+        if (r == 2 && mob.scaffolding.obstacle() != null && task.tries() < 3) {
             // Block über dem Kopf (zum Springen nötig): wegräumen, dann weiter hochbauen
-            BlockPos o = mob.pillarObstacle;
+            BlockPos o = mob.scaffolding.obstacle();
             mob.replaceCurrent(List.of(Task.breakAt(o, sl.getBlockState(o).getBlock()),
                     task.retry()));
             return Status.REPLACED;

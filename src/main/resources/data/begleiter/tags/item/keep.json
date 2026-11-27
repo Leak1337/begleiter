@@ -1,0 +1,22 @@
+{
+  "replace": false,
+  "values": [
+    "#minecraft:swords",
+    "minecraft:torch",
+    "minecraft:crafting_table",
+    "minecraft:furnace",
+    "minecraft:shield",
+    "minecraft:bucket",
+    "minecraft:water_bucket",
+    "minecraft:flint_and_steel",
+    "minecraft:blaze_rod",
+    "minecraft:blaze_powder",
+    "minecraft:ender_pearl",
+    "minecraft:ender_eye",
+    "minecraft:bow",
+    "minecraft:arrow",
+    "minecraft:string",
+    "minecraft:feather",
+    "minecraft:flint"
+  ]
+}

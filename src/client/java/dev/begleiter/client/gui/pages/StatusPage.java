@@ -38,7 +38,7 @@ public final class StatusPage implements ControlPage {
         }
         s.text(g, s.tr("gui.begleiter.status.hunger", s.data().hunger()), 110, 64, 188, ControlTheme.TEXT);
         s.paragraph(g, s.data().needs(), 110, 83, 188, 5, ControlTheme.TEXT);
-        s.text(g, s.tr("gui.begleiter.status.progress"), 110, 142, 188, ControlTheme.MUTED);
+        s.heading(g, s.tr("gui.begleiter.status.progress"), 108, 142, 194);
         s.paragraph(g, s.data().stage().isEmpty() ? s.tr("gui.begleiter.no_plan") : s.data().stage(), 110, 156, 188, 2, ControlTheme.TEXT);
         s.paragraph(g, s.tr("gui.begleiter.status.environment", s.data().hazard()), 110, 185, 188, 2, ControlTheme.MUTED);
     }

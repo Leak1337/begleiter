@@ -31,7 +31,7 @@ final class CollectHandler implements TaskHandler {
         boolean any = collect.anyAge();
         if (!any && mob.tickCount < mob.collectBlockedUntil) return Status.DONE; // gerade abgegeben: nicht zurückholen
         var zones = dev.begleiter.CompanionZones.collectionZones(mob);
-        java.util.function.Predicate<ItemEntity> eligible = ie -> (any || ie.getAge() < 6000) && mob.collectible(ie);
+        java.util.function.Predicate<ItemEntity> eligible = ie -> (any || ie.getAge() < 6000) && mob.pickup.collectible(ie);
         // Getrennte Bereiche einzeln abfragen: auch weit auseinanderliegende Zonen erzeugen keine riesige Suchbox.
         var found = new java.util.LinkedHashSet<ItemEntity>();
         if (zones.isEmpty()) found.addAll(ctx.level().getEntitiesOfClass(ItemEntity.class,
@@ -41,9 +41,9 @@ final class CollectHandler implements TaskHandler {
         if (items.isEmpty() || !mob.hasFreeSlot()) return Status.DONE;
         items.sort(Comparator.comparingDouble(mob::distanceToSqr));
         ItemEntity item = items.get(0);
-        if (mob.chase(item)) ctx.resetStuck();
-        if (mob.chaseTicks() > 200) { // kommt nicht ran (z.B. hinter Wasser/in einer Mulde): merken, nächstes
-            mob.giveUpChase(item);
+        if (mob.pickup.chase(item)) ctx.resetStuck();
+        if (mob.pickup.chaseTicks() > 200) { // kommt nicht ran (z.B. hinter Wasser/in einer Mulde): merken, nächstes
+            mob.pickup.giveUpChase(item);
             mob.logInfo(CompanionTexts.tr("handler.collect.unreachable", item.getItem().getHoverName(), item.blockPosition().toShortString()));
             return Status.RUNNING;
         }
@@ -52,7 +52,7 @@ final class CollectHandler implements TaskHandler {
             if (ctx.useNewPathing(ip)) {
                 ctx.approachGoal(new Goal.Near(ip.getX(), ip.getY(), ip.getZ(), 1), ip);
                 // Warten auf Rechenzeit (viele Begleiter) ist kein Zeichen, dass das Item unerreichbar ist.
-                if (mob.nav.waitingForBudget()) mob.holdChase();
+                if (mob.nav.waitingForBudget()) mob.pickup.holdChase();
                 return Status.RUNNING;
             }
             if (mob.tickCount % 10 == 0) mob.getNavigation().moveTo(item, 1.2);
@@ -61,6 +61,7 @@ final class CollectHandler implements TaskHandler {
         }
         if (item.hasPickUpDelay()) return Status.RUNNING; // frisch geworfen/gefallen: wie ein Spieler warten
         ItemStack rest = mob.giveToInventory(item.getItem().copy());
+        if (rest.getCount() < item.getItem().getCount()) mob.work.progress(1);
         if (rest.isEmpty()) item.discard(); else item.setItem(rest);
         ctx.resetStuck();
         return Status.RUNNING;

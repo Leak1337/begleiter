@@ -63,12 +63,15 @@ public final class CompanionJobs {
     /** Saatgut, das er dabei hat (Slot), bevorzugt die Sorte des Feldes; -1 = keins. */
     public static int seedSlot(CompanionEntity e, String prefer) {
         if (prefer != null) {
-            int s = e.findItem(CompanionCraft.item(prefer));
-            if (s >= 0) return s;
+            Item item = CompanionCraft.item(prefer);
+            int s = e.findItem(item);
+            if (s >= 0 && e.work.permitsInput(item, 1)) return s;
+            if (e.work.is(CompanionWork.Kind.FARM)) return -1;
         }
         for (String seed : List.of("wheat_seeds", "carrot", "potato", "beetroot_seeds")) {
-            int s = e.findItem(CompanionCraft.item(seed));
-            if (s >= 0) return s;
+            Item item = CompanionCraft.item(seed);
+            int s = e.findItem(item);
+            if (s >= 0 && e.work.permitsInput(item, 1)) return s;
         }
         return -1;
     }
@@ -84,8 +87,9 @@ public final class CompanionJobs {
             if (!sl.hasChunkAt(p) || skip.contains(p)) continue;
             BlockState s = sl.getBlockState(p);
             boolean target = isMatureCrop(s) || (seeds && s.isAir() && sl.getBlockState(p.below()).is(Blocks.FARMLAND));
-            if (!target) continue;
-            double d = p.distSqr(me);
+            if (!target || e.work.farmCandidate(sl, p) == null) continue;
+            if (isMatureCrop(s) && !e.work.permitsInput(CompanionCraft.item(SEED_FOR.get(id(s.getBlock()))), 1)) continue;
+            double d = p.distSqr(me) * (e.work.is(CompanionWork.Kind.FARM) ? e.routes.sourcePreference(sl, p) : 1);
             if (d < bestD) { bestD = d; best = p.immutable(); }
         }
         return best;
@@ -110,6 +114,7 @@ public final class CompanionJobs {
         String prefer = null;
         if (isMatureCrop(s)) {
             prefer = SEED_FOR.get(id(s.getBlock()));
+            if (!e.work.permitsInput(CompanionCraft.item(prefer), 1)) return 0;
             if (!e.mineBlock(sl, p, s)) return 0;
             result = 1;
         }
@@ -119,7 +124,9 @@ public final class CompanionJobs {
                 Block crop = Block.byItem(e.getInventory().getItem(slot).getItem());
                 if (crop instanceof CropBlock && e.placeConfirmed(sl, p, crop.defaultBlockState())) {
                     sl.playSound(null, p, SoundEvents.CROP_PLANTED, SoundSource.BLOCKS, 1f, 1f);
-                    e.getInventory().getItem(slot).shrink(1);
+                    var seed = e.getInventory().getItem(slot);
+                    e.work.spent(seed.getItem(), 1);
+                    seed.shrink(1);
                     if (result == 0) result = 2;
                 }
             }
@@ -181,41 +188,66 @@ public final class CompanionJobs {
         return Category.OTHER;
     }
 
-    public record SortResult(int boxes, List<Component> lineTexts) {
+    /** @param failure null = sortiert (oder nichts zu tun); sonst die Meldung, warum nichts bzw. nicht alles geklappt hat */
+    public record SortResult(int boxes, List<Component> lineTexts, Component failure) {
+        public SortResult(int boxes, List<Component> lineTexts) { this(boxes, lineTexts, null); }
         public List<String> lines() { return lineTexts.stream().map(Component::getString).toList(); }
+        public boolean failed() { return failure != null; }
     }
 
     /**
      * Alle Kisten im Umkreis zusammen aufräumen, nach Sorten: jede Sorte bekommt eigene Kisten (genug Kisten) bzw.
      * die Sorten werden gleichmäßig auf die Kisten verteilt (wenige Kisten). Stapel werden zusammengelegt.
+     * Das Zielbild entsteht nur aus Kopien; geschrieben wird über {@link ContainerRewrite}, das bei einem Fehler den
+     * alten Inhalt wiederherstellt. Passt die Sortenaufteilung nicht, werden die Sorten verdichtet; passt auch das
+     * nicht, bleibt alles unverändert.
      */
     public static SortResult sortByCategory(CompanionEntity e, ServerLevel sl, BlockPos center) {
         List<BlockPos> where = new ArrayList<>();
         List<Container> boxes = new ArrayList<>();
         for (BlockPos p : e.storageBoxes(sl, center)) {
+            if (e.storage.protectedStockStorage(sl, p)) continue;
             Container c = e.containerAt(sl, p);
             if (c == null) continue;
             where.add(p);
             boxes.add(c);
         }
         if (boxes.isEmpty()) return new SortResult(0, List.of());
+        List<ItemStack[]> before = ContainerRewrite.snapshot(boxes);
         Map<Category, List<ItemStack>> byCat = new EnumMap<>(Category.class);
-        for (Container c : boxes) {
-            for (int i = 0; i < c.getContainerSize(); i++) {
-                ItemStack s = c.getItem(i);
+        for (ItemStack[] box : before)
+            for (ItemStack s : box)
                 if (!s.isEmpty()) byCat.computeIfAbsent(category(s), k -> new ArrayList<>()).add(s.copy());
-            }
-            c.clearContent();
-        }
         // je Sorte zusammenlegen und nach Item sortieren
         Map<Category, List<ItemStack>> merged = new EnumMap<>(Category.class);
         byCat.forEach((cat, list) -> {
             list.sort(Comparator.comparing((ItemStack s) -> id(s.getItem())));
             merged.put(cat, mergeStacks(list));
         });
+        Map<Integer, Set<Category>> labels = new LinkedHashMap<>();
+        ItemStack[][] target = layoutByCategory(boxes, merged, labels);
+        if (target == null) {
+            labels.clear();
+            target = layoutDense(boxes, merged, labels);
+        }
+        if (target == null) return new SortResult(boxes.size(), List.of(), CompanionTexts.tr("jobs.sort.no_room"));
+        Component failure = reportRewrite(e, sl, ContainerRewrite.apply(boxes, before, target));
+        List<Component> lines = new ArrayList<>();
+        for (int i = 0; i < boxes.size(); i++) {
+            e.memory.noteChest(sl, where.get(i), boxes.get(i));
+            Set<Category> l = labels.get(i);
+            lines.add(CompanionTexts.tr("jobs.sort.line", where.get(i).toShortString(), l == null
+                    ? CompanionTexts.tr("jobs.sort.empty") : CompanionTexts.join(l.stream().map(Category::labelText).toList(), ", ")));
+        }
+        return failure == null ? new SortResult(boxes.size(), lines) : new SortResult(boxes.size(), List.of(), failure);
+    }
+
+    /** Zielbild mit Sortengrenzen; null, wenn nicht alles hineinpasst. */
+    private static ItemStack[][] layoutByCategory(List<Container> boxes, Map<Category, List<ItemStack>> merged,
+                                                  Map<Integer, Set<Category>> labels) {
+        ItemStack[][] target = ContainerRewrite.emptyLayout(boxes);
         int cats = merged.size();
         int perBox = cats == 0 ? 1 : Math.max(1, (cats + boxes.size() - 1) / boxes.size());
-        Map<Integer, Set<Category>> labels = new LinkedHashMap<>();
         // Was hinter der letzten Kiste nicht mehr passt, weil Sorten Kistenreste übersprungen haben
         List<Map.Entry<Category, ItemStack>> overflow = new ArrayList<>();
         int box = 0, slot = 0, catsInBox = 0;
@@ -223,9 +255,9 @@ public final class CompanionJobs {
         boolean firstCat = true;
         for (Map.Entry<Category, List<ItemStack>> en : merged.entrySet()) {
             // neue Sorte: in die nächste Kiste, wenn diese schon genug Sorten hat (und es noch eine gibt)
-            if (!firstCat && (catsInBox >= perBox || slot >= boxes.get(box).getContainerSize()) && box + 1 < boxes.size()) {
+            if (!firstCat && (catsInBox >= perBox || slot >= target[box].length) && box + 1 < boxes.size()) {
                 int laterCapacity = 0;
-                for (int i = box + 1; i < boxes.size(); i++) laterCapacity += boxes.get(i).getContainerSize();
+                for (int i = box + 1; i < boxes.size(); i++) laterCapacity += target[i].length;
                 if (remainingStacks <= laterCapacity) {
                     box++;
                     slot = 0;
@@ -234,39 +266,70 @@ public final class CompanionJobs {
             }
             firstCat = false;
             catsInBox++;
-            for (ItemStack s : en.getValue()) {
+            for (ItemStack original : en.getValue()) {
+                ItemStack s = original.copy();
                 remainingStacks--;
-                while (box < boxes.size() && slot >= boxes.get(box).getContainerSize()) { box++; slot = 0; }
-                if (box >= boxes.size()) { overflow.add(Map.entry(en.getKey(), s)); continue; }
-                boxes.get(box).setItem(slot++, s);
-                labels.computeIfAbsent(box, k -> new LinkedHashSet<>()).add(en.getKey());
+                while (!s.isEmpty() && box < boxes.size()) {
+                    if (slot >= target[box].length) { box++; slot = 0; continue; }
+                    int count = s.getCount();
+                    slot = ContainerRewrite.place(boxes.get(box), target[box], slot, s);
+                    if (s.getCount() != count) labels.computeIfAbsent(box, k -> new LinkedHashSet<>()).add(en.getKey());
+                }
+                if (!s.isEmpty()) overflow.add(Map.entry(en.getKey(), s));
             }
             if (box >= boxes.size()) box = boxes.size() - 1;
         }
-        // Sortengrenzen aufweichen statt abwerfen: Zusammengelegte Stapel brauchen nie mehr Plätze als vorher belegt
-        // waren, also findet der Überlauf in den übersprungenen freien Plätzen immer Platz.
-        for (int b = 0; b < boxes.size() && !overflow.isEmpty(); b++) {
-            Container c = boxes.get(b);
-            for (int i = 0; i < c.getContainerSize() && !overflow.isEmpty(); i++) {
-                if (!c.getItem(i).isEmpty()) continue;
-                var en = overflow.removeFirst();
-                c.setItem(i, en.getValue());
-                labels.computeIfAbsent(b, k -> new LinkedHashSet<>()).add(en.getKey());
+        // Sortengrenzen aufweichen: Überlauf in die übersprungenen freien Plätze
+        for (var en : overflow) {
+            ItemStack s = en.getValue();
+            for (int b = 0; b < boxes.size() && !s.isEmpty(); b++) {
+                int count = s.getCount();
+                ContainerRewrite.place(boxes.get(b), target[b], 0, s);
+                if (s.getCount() != count) labels.computeIfAbsent(b, k -> new LinkedHashSet<>()).add(en.getKey());
+            }
+            if (!s.isEmpty()) return null;
+        }
+        return target;
+    }
+
+    /** Zielbild ohne Sortengrenzen (Sorten verdichtet, Reihenfolge bleibt); null, wenn nicht alles hineinpasst. */
+    private static ItemStack[][] layoutDense(List<Container> boxes, Map<Category, List<ItemStack>> merged,
+                                             Map<Integer, Set<Category>> labels) {
+        ItemStack[][] target = ContainerRewrite.emptyLayout(boxes);
+        for (var en : merged.entrySet()) {
+            for (ItemStack original : en.getValue()) {
+                ItemStack s = original.copy();
+                for (int b = 0; b < boxes.size() && !s.isEmpty(); b++) {
+                    int count = s.getCount();
+                    ContainerRewrite.place(boxes.get(b), target[b], 0, s);
+                    if (s.getCount() != count) labels.computeIfAbsent(b, k -> new LinkedHashSet<>()).add(en.getKey());
+                }
+                if (!s.isEmpty()) return null;
             }
         }
-        for (var en : overflow) { // kann nicht passieren – Gegenstände trotzdem nie vernichten
-            e.logError(CompanionTexts.tr("jobs.sort.overflow", en.getValue().getCount(), en.getValue().getHoverName()));
-            e.spawnAtLocation(sl, en.getValue());
+        return target;
+    }
+
+    /**
+     * Meldet ein fehlgeschlagenes Schreiben im Diagnose-Log und wirft Items ab, die weder geschrieben noch
+     * wiederhergestellt werden konnten (nie vernichten).
+     *
+     * @return null bei Erfolg, sonst die Meldung für den Spieler
+     */
+    static Component reportRewrite(CompanionEntity e, ServerLevel sl, ContainerRewrite.Result r) {
+        Component msg = switch (r.outcome()) {
+            case WRITTEN, UNCHANGED -> null;
+            case STALE, MISMATCH -> CompanionTexts.tr("jobs.sort.aborted");
+            case RESTORED -> CompanionTexts.tr("jobs.sort.restored");
+            case RESTORE_FAILED -> CompanionTexts.tr("jobs.sort.restore_failed", r.missing().size());
+        };
+        if (msg == null) return null;
+        e.logError(msg);
+        for (ItemStack s : r.missing()) {
+            e.logError(CompanionTexts.tr("jobs.sort.restore_failed_item", s.getCount(), s.getHoverName()));
+            e.spawnAtLocation(sl, s);
         }
-        List<Component> lines = new ArrayList<>();
-        for (int i = 0; i < boxes.size(); i++) {
-            boxes.get(i).setChanged();
-            e.memory.noteChest(sl, where.get(i), boxes.get(i));
-            Set<Category> l = labels.get(i);
-            lines.add(CompanionTexts.tr("jobs.sort.line", where.get(i).toShortString(), l == null
-                    ? CompanionTexts.tr("jobs.sort.empty") : CompanionTexts.join(l.stream().map(Category::labelText).toList(), ", ")));
-        }
-        return new SortResult(boxes.size(), lines);
+        return msg;
     }
 
     static List<ItemStack> mergeStacks(List<ItemStack> in) {
@@ -301,7 +364,7 @@ public final class CompanionJobs {
     public static int feedSlot(CompanionEntity e, Animal a) {
         for (int i = 0; i < e.getInventory().getContainerSize(); i++) {
             ItemStack s = e.getInventory().getItem(i);
-            if (!s.isEmpty() && a.isFood(s)) return i;
+            if (!s.isEmpty() && a.isFood(s) && e.work.permitsInput(s.getItem(), 1)) return i;
         }
         return -1;
     }
@@ -355,10 +418,19 @@ public final class CompanionJobs {
     public static void feed(CompanionEntity e, Animal a) {
         int slot = feedSlot(e, a);
         if (slot < 0) return;
+        ItemStack food = e.getInventory().getItem(slot).copyWithCount(1);
+        e.getLookControl().setLookAt(a);
         e.getInventory().getItem(slot).shrink(1);
         e.swingArm();
-        e.getLookControl().setLookAt(a);
         a.setInLove(null);
+        e.work.spent(food.getItem(), 1);
+        // Futterkrümel am Kopf des Tiers und Fressgeräusch, wie beim Füttern durch einen Spieler
+        if (e.level() instanceof ServerLevel sl) {
+            sl.sendParticles(new net.minecraft.core.particles.ItemParticleOption(net.minecraft.core.particles.ParticleTypes.ITEM,
+                    food.getItem()),
+                    a.getX(), a.getEyeY(), a.getZ(), 6, 0.15, 0.1, 0.15, 0.05);
+            sl.playSound(null, a.blockPosition(), SoundEvents.GENERIC_EAT.value(), SoundSource.NEUTRAL, 0.6f, 1.2f);
+        }
     }
 
     /** Holen: kein schon angeleintes Tier (Zaun, anderer Spieler) und kein gezähmtes Tier eines anderen Spielers. */
@@ -466,12 +538,9 @@ public final class CompanionJobs {
     }
 
     /** Amboss in der Nähe (auch angeschlagen). */
+    /** Nächster Amboss in jedem Zustand (eine gemeinsame Suche statt einer je Zustand). */
     public static BlockPos findAnvil(CompanionEntity e, int r) {
-        for (String id : List.of("anvil", "chipped_anvil", "damaged_anvil")) {
-            BlockPos p = e.findStation(id, r);
-            if (p != null) return p;
-        }
-        return null;
+        return e.findStation(List.of("anvil", "chipped_anvil", "damaged_anvil"), r);
     }
 
     /**
@@ -569,7 +638,8 @@ public final class CompanionJobs {
         // Für unbekannte Fremditems gibt es keine automatische Wert-/Reservepolitik.
         if (!"minecraft".equals(BuiltInRegistries.ITEM.getKey(cost.getItem()).getNamespace())) return false;
         if (CompanionEntity.isPrecious(cost.getItem())) return false;
-        return countOf(e, cost.getItem()) - cost.getCount() >= reserve(cost.getItem());
+        return countOf(e, cost.getItem()) - cost.getCount() >= reserve(cost.getItem())
+                && e.work.permitsInput(cost.getItem(), cost.getCount());
     }
 
     /** Ein Angebot dieses Dorfbewohners: kaufen (want != null) oder überzähliges Zeug gegen Smaragde verkaufen. */
@@ -598,6 +668,8 @@ public final class CompanionJobs {
         pay(e, a);
         if (!b.isEmpty()) pay(e, b);
         v.notifyTrade(o);
+        e.work.spent(a.getItem(), a.getCount());
+        e.work.spent(b.getItem(), b.getCount());
         ItemStack rest = e.giveToInventory(result.copy());
         if (!rest.isEmpty() && v.level() instanceof ServerLevel sl) e.spawnAtLocation(sl, rest);
         e.swingArm();

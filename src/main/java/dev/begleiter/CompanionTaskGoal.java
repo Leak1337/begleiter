@@ -64,7 +64,9 @@ public class CompanionTaskGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        return !mob.isPaused() && (mob.duty() == null || mob.dutyPos() != null) && mob.currentTask() != null && mob.getTarget() == null && !mob.isRetreating();
+        return !mob.isPaused() && (mob.duty() == null || mob.dutyPos() != null) && mob.currentTask() != null
+                && mob.getTarget() == null && !mob.isRetreating()
+                && (!(mob.level() instanceof ServerLevel world) || mob.work.runnable(world));
     }
 
     @Override
@@ -95,12 +97,15 @@ public class CompanionTaskGoal extends Goal {
 
     private void reset() {
         mob.nav.stop();
+        approachTarget = null;
         stuck = 0;
         noPath = 0;
         lastPos = null;
         bestDist = Double.MAX_VALUE;
         bestDistTick = mob.tickCount;
     }
+
+    private BlockPos approachTarget;
 
     private void done() {
         releaseHandler();
@@ -131,6 +136,21 @@ public class CompanionTaskGoal extends Goal {
         if (status == TaskHandler.Status.FAILED && mob.hasRecipeRequest()) {
             releaseHandler();
             mob.pauseRecipeRequest(CompanionTexts.tr("request.paused", CompanionTexts.task(t)));
+            reset();
+            return;
+        }
+        if (status == TaskHandler.Status.FAILED && t.spec() instanceof TaskSpec.Break b && b.scoped()
+                && mob.level() instanceof ServerLevel world && mob.storage.stockHarvestAllowed(world, b)) mob.noteGatherMiss(world, b.pos());
+        if (status == TaskHandler.Status.FAILED && mob.work.active()) {
+            releaseHandler();
+            mob.work.taskFailed();
+            reset();
+            return;
+        }
+        if (status == TaskHandler.Status.FAILED && mob.journey.running()) {
+            mob.consoleDebug("journey task failed: " + t.spec() + " tries=" + t.tries() + " at " + mob.blockPosition().toShortString());
+            releaseHandler();
+            mob.journey.fail();
             reset();
             return;
         }
@@ -166,6 +186,7 @@ public class CompanionTaskGoal extends Goal {
      * nach "unerreichbar" hilft die normale Mob-Navigation aus.
      */
     private boolean approach(BlockPos p, double reachSqr) {
+        approachTarget = p;
         if (guardedSupply() && (mob.onGround() || mob.isInWater())
                 && mob.level() instanceof ServerLevel sl && mob.memory.dangerous(sl, p, 2)) {
             abortAutonomousPlan(dev.begleiter.ai.DecisionOutcome.Reason.ROUTE_UNPROVEN);
@@ -288,9 +309,11 @@ public class CompanionTaskGoal extends Goal {
     @Override
     public void tick() {
         if (!(mob.level() instanceof ServerLevel sl)) return;
+        if (!mob.work.runnable(sl)) { releaseHandler(); reset(); return; }
         Task t = mob.currentTask();
         if (t == null) { releaseHandler(); return; }
-        if (mob.tickCount % 10 == 0 && !mob.isPillarActive() && mob.droppedBelowDigPlan()) { releaseHandler(); reset(); return; }
+        if (!mob.work.active() && !mob.scopedStockWork() && mob.tickCount % 10 == 0 && !mob.isPillarActive()
+                && mob.orders.droppedBelowDigPlan()) { releaseHandler(); reset(); return; }
         if (t != active) {
             active = t;
             reset();
@@ -306,6 +329,50 @@ public class CompanionTaskGoal extends Goal {
             }
         }
         if (stuck >= 120) { // kommt nicht weiter (die Wegfindung gräbt/baut schon selbst, ohne Erfolg)
+            if (mob.journey.running()) {
+                releaseHandler();
+                mob.journey.fail();
+                reset();
+                return;
+            }
+            if (mob.work.active()) {
+                if (t.spec() instanceof TaskSpec.Break b && b.scoped()) mob.noteGatherMiss(sl, b.pos());
+                releaseHandler();
+                mob.work.taskFailed();
+                reset();
+                return;
+            }
+            if (mob.scopedStockWork()) {
+                if (t.spec() instanceof TaskSpec.Break b) mob.noteGatherMiss(sl, b.pos());
+                done();
+                return;
+            }
+            if (mob.hasRecipeRequest() && approachTarget != null && (t.spec() instanceof TaskSpec.Craft
+                    || t.spec() instanceof TaskSpec.Smelt || t.spec() instanceof TaskSpec.Process)) {
+                var failed = approachTarget;
+                mob.markStationUnreachable(failed);
+                var reason = CompanionTexts.tr("order.station_unreachable", failed.toShortString());
+                String station = switch (t.spec()) {
+                    case TaskSpec.Craft ignored -> "crafting_table";
+                    case TaskSpec.Smelt ignored -> "furnace";
+                    case TaskSpec.Process p -> {
+                        var recipe = CompanionRecipes.processingRecipe(sl, p.recipe());
+                        yield recipe == null ? null : recipe.station();
+                    }
+                    default -> null;
+                };
+                if (station != null && mob.findOrderStation(station, 24) != null) {
+                    mob.replaceCurrent(List.of(t.retry()));
+                    releaseHandler();
+                    reset();
+                    return;
+                }
+                if (mob.recoverRecipeProduction(reason)) {
+                    releaseHandler();
+                    reset();
+                    return;
+                }
+            }
             // Werkbank unerreichbar (Schlucht, Wasser ...): sie meiden und eine eigene hinstellen
             if (t.spec() instanceof TaskSpec.Craft craft && t.tries() < 3 && !"#planks_from_logs".equals(craft.item())) {
                 BlockPos table = mob.findStation("crafting_table", 24);
@@ -325,8 +392,11 @@ public class CompanionTaskGoal extends Goal {
             mob.reportAutonomousFailure(dev.begleiter.ai.DecisionOutcome.Reason.UNREACHABLE, t);
             if (mob.hasRecipeRequest()) {
                 releaseHandler();
-                if (t.spec() instanceof TaskSpec.Take take)
-                    mob.recoverRecipeSource(take.item(), CompanionCraft.count(mob, take.item()) + take.count(), take.pos());
+                if (t.spec() instanceof TaskSpec.Take take && mob.orders.isPlanningHomeOrder()) {
+                    mob.noteGatherMiss(sl, take.pos());
+                    mob.recoverRecipeProduction(CompanionTexts.tr("request.paused", CompanionTexts.task(t)));
+                } else if (t.spec() instanceof TaskSpec.Take take)
+                    mob.orders.recoverRecipeSource(take.item(), CompanionCraft.count(mob, take.item()) + take.count(), take.pos());
                 else mob.pauseRecipeRequest(CompanionTexts.tr("request.paused", CompanionTexts.task(t)));
                 reset();
                 return;
@@ -352,6 +422,18 @@ public class CompanionTaskGoal extends Goal {
             mob.problem(CompanionTexts.tr("handler.goal.error", CompanionTexts.task(t), CompanionTexts.literal(String.valueOf(ex))));
             StackTraceElement[] st = ex.getStackTrace();
             for (int i = 0; i < Math.min(3, st.length); i++) mob.logError(CompanionTexts.literal("  at " + st[i]));
+            if (mob.journey.running()) {
+                releaseHandler();
+                mob.journey.fail();
+                reset();
+                return;
+            }
+            if (mob.work.active()) {
+                releaseHandler();
+                mob.work.taskFailed();
+                reset();
+                return;
+            }
             if (mob.hasRecipeRequest()) {
                 releaseHandler();
                 mob.pauseRecipeRequest(CompanionTexts.tr("request.paused", CompanionTexts.task(t)));
@@ -369,9 +451,10 @@ public class CompanionTaskGoal extends Goal {
      * baut er sie zwischendurch ab und läuft dann weiter. Nicht beim Bauen, Bäumefällen oder mit vollem Inventar.
      */
     private boolean grabPassingOres(ServerLevel sl, Task t) {
+        if (mob.work.active() || mob.scopedStockWork() || mob.hasRecipeRequest()) return false;
         if (t.type() != TaskType.MINE && t.type() != TaskType.MOVE_TO && t.type() != TaskType.TRAVEL
                 && !(t.type() == TaskType.BREAK && sl.hasChunkAt(t.pos()) && !sl.getBlockState(t.pos()).is(BlockTags.ORES))) return false;
-        if (mob.isPillarActive() || !mob.canMakeRoomFor(Items.RAW_IRON, true)) return false;
+        if (mob.isPillarActive() || !mob.items.canMakeRoomFor(Items.RAW_IRON, true)) return false;
         boolean mining = false;
         for (Task q : mob.peekTasks(64)) {
             if (q.type() == TaskType.BUILD || q.type() == TaskType.TREE) return false;
@@ -390,6 +473,13 @@ public class CompanionTaskGoal extends Goal {
      * kurz später neu entscheiden lassen, statt sinnlose Folgeaufgaben abzuarbeiten.
      */
     private void failChain() {
+        mob.consoleDebug("fail chain: " + (mob.currentTask() == null ? "-" : mob.currentTask().spec()) + " at " + mob.blockPosition().toShortString());
+        if (mob.journey.running()) {
+            releaseHandler();
+            mob.journey.fail();
+            reset();
+            return;
+        }
         if (mob.hasRecipeRequest()) {
             releaseHandler();
             mob.pauseRecipeRequest(CompanionTexts.tr("request.paused", CompanionTexts.task(mob.currentTask())));

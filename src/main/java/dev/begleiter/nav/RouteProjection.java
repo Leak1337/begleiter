@@ -77,7 +77,7 @@ final class RouteProjection {
             for (BlockPos p : intended.plannedBreaks()) {
                 int flags = preview.blocks.flags(p.getX(), p.getY(), p.getZ());
                 if (BlockFlags.has(flags, BlockFlags.PASS | BlockFlags.DOOR | BlockFlags.GATE | BlockFlags.CLIMB
-                        | BlockFlags.PORTAL | BlockFlags.LIQUID)) continue;
+                        | BlockFlags.PORTAL | BlockFlags.END_PORTAL | BlockFlags.LIQUID)) continue;
                 if (BlockFlags.has(flags | preview.blocks.flags(p.getX(), p.getY() + 1, p.getZ()), BlockFlags.FALLING))
                     return fail(Status.UNPROVEN, CompanionTexts.tr("route.falling_blocks"));
                 if (!watch(p) || !watch(p.above())) return status;

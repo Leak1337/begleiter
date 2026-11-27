@@ -27,6 +27,12 @@ public final class BlockCache {
     private int chunkX = Integer.MIN_VALUE, chunkZ = Integer.MIN_VALUE;
     private long revision;
     private final boolean fastSearchCaches;
+    private final boolean fastSections;
+    private final LevelChunkSection[] sections = new LevelChunkSection[8];
+    private final long[] sectionKeys = new long[sections.length];
+    private int cachedSections;
+    private int lastSectionX = Integer.MIN_VALUE, lastSectionY, lastSectionZ;
+    private LevelChunkSection lastSection;
     private boolean searching;
     private PositionCache<BlockState> states;
     private long stateRequests;
@@ -54,7 +60,7 @@ public final class BlockCache {
             indices.put(key, size++);
         }
     }
-    long stateCacheHits, stateCacheMisses, worldReads, reusedFlights;
+    long stateCacheHits, stateCacheMisses, worldReads, reusedFlights, sectionLookups, chunkLookups;
 
     public BlockCache(ServerLevel level) {
         this(level, java.util.Map.of());
@@ -67,9 +73,14 @@ public final class BlockCache {
 
     /** Referenzmodus ohne Zusatz-Cache, nur für Vergleichstests und Messungen. */
     BlockCache(ServerLevel level, java.util.Map<Long, BlockState> projection, boolean fastSearchCaches) {
+        this(level, projection, fastSearchCaches, true);
+    }
+
+    BlockCache(ServerLevel level, java.util.Map<Long, BlockState> projection, boolean fastSearchCaches, boolean fastSections) {
         this.level = level;
         this.projection = projection;
         this.fastSearchCaches = fastSearchCaches;
+        this.fastSections = fastSections;
         this.minY = level.getMinY();
         this.maxY = level.getMaxY();
         this.minSection = minY >> 4;
@@ -84,15 +95,18 @@ public final class BlockCache {
         // Die Suche läuft über mehrere Ticks: den gemerkten Chunk neu holen, er kann inzwischen entladen sein
         chunk = null;
         chunkX = chunkZ = Integer.MIN_VALUE;
+        invalidateSections();
     }
     void endSearch(boolean finished) {
         searching = false;
         if (finished) { states = null; stateRequests = 0; }
     }
     boolean searching() { return searching; }
+    boolean optimizedReads() { return fastSections; }
 
     private LevelChunk chunk(int cx, int cz) {
         if (cx != chunkX || cz != chunkZ) {
+            chunkLookups++;
             chunk = level.getChunkSource().getChunkNow(cx, cz);
             chunkX = cx;
             chunkZ = cz;
@@ -145,11 +159,41 @@ public final class BlockCache {
     /** Echter Zustand ohne Vorschau/Schnappschuss; lädt weiterhin keinen Chunk nach. */
     private BlockState currentWorldState(int x, int y, int z) {
         if (y < minY || y > maxY) return VOID;
-        LevelChunk c = chunk(x >> 4, z >> 4);
-        if (c == null) return null;
-        LevelChunkSection sec = c.getSection((y >> 4) - minSection);
+        int cx = x >> 4, cy = y >> 4, cz = z >> 4;
+        LevelChunkSection sec = fastSections && (searching || verification != null)
+                ? cachedSection(cx, cy, cz) : section(cx, cy, cz);
+        if (sec == null) return null;
         worldReads++;
         return sec.getBlockState(x & 15, y & 15, z & 15);
+    }
+
+    private LevelChunkSection section(int cx, int cy, int cz) {
+        sectionLookups++;
+        LevelChunk c = chunk(cx, cz);
+        return c == null ? null : c.getSection(cy - minSection);
+    }
+
+    private LevelChunkSection cachedSection(int cx, int cy, int cz) {
+        if (cx == lastSectionX && cy == lastSectionY && cz == lastSectionZ) return lastSection;
+        int slot = (cx + 3 * cz + 5 * cy) & (sections.length - 1);
+        int bit = 1 << slot;
+        long key = BlockPos.asLong(cx, cy, cz);
+        if ((cachedSections & bit) == 0 || sectionKeys[slot] != key) {
+            sections[slot] = section(cx, cy, cz);
+            sectionKeys[slot] = key;
+            cachedSections |= bit;
+        }
+        lastSectionX = cx;
+        lastSectionY = cy;
+        lastSectionZ = cz;
+        return lastSection = sections[slot];
+    }
+
+    private void invalidateSections() {
+        cachedSections = 0;
+        lastSectionX = Integer.MIN_VALUE;
+        lastSection = null;
+        java.util.Arrays.fill(sections, null);
     }
 
     void beginVerificationSnapshot() {
@@ -201,6 +245,7 @@ public final class BlockCache {
         if (states != null) states.clear();
         chunk = null;
         chunkX = chunkZ = Integer.MIN_VALUE;
+        invalidateSections();
         revision++;
     }
 

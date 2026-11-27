@@ -15,6 +15,7 @@ import net.minecraft.world.phys.Vec3;
 
 import dev.begleiter.CompanionCraft;
 import dev.begleiter.CompanionEntity;
+import dev.begleiter.CompanionGathering;
 import dev.begleiter.CompanionEntity.Task;
 import dev.begleiter.CompanionMemory;
 import dev.begleiter.CompanionPlanner;
@@ -38,6 +39,10 @@ final class MineHandler implements TaskHandler {
     private Goal oreGoal;
     /** Grabziel ohne Erz in Sicht. */
     private BlockPos digTarget;
+    /** Geschützter Modus (eigene Beschaffung): nachgewiesener Hin- und Rückweg zum nächsten Erz des Gangs. */
+    private dev.begleiter.nav.RoundTripCheck oreTrip;
+    private BlockPos oreTripTarget;
+    private boolean oreTripInstalled;
 
     MineHandler(Task task) {
         this.task = task;
@@ -79,8 +84,18 @@ final class MineHandler implements TaskHandler {
         // 40 Runden am selben Erz, statt woanders zu graben)
         ores.removeIf(o -> o.pos() != null && mining.blacklisted(o.pos()));
         if (!ores.isEmpty() && startOreRun(mob, sl, mining, ores)) return continueOreRun(ctx, res);
-        if (emergency && !ores.isEmpty() && CompanionEntity.deepWater(sl, ores.getFirst().pos()))
+        if (emergency && !ores.isEmpty() && CompanionGathering.deepWater(sl, ores.getFirst().pos()))
             mob.logInfo(CompanionTexts.tr("handler.mine.dive", CompanionTexts.resource(res.key())));
+        // Geschützter Modus: auch gespürte Erze nur über den geprüften Erz-Gang, nie als ungeprüfte Einzel-Abbauten
+        if (ctx.guardedSupply()) {
+            if (ores.isEmpty()) {
+                var vein = mining.knownVein(sl, res, emergency);
+                if (!vein.isEmpty() && startOreRunAt(mob, sl, mining, vein)) return continueOreRun(ctx, res);
+            } else {
+                mob.replaceCurrent(List.of(new Task(spec, task.tries() + 1))); // alle mit Gefahr daneben: neu suchen
+                return Status.REPLACED;
+            }
+        }
         // Beim Graben gespürtes Erz in der Nähe: direkt hingraben statt weiter zu suchen
         if (ores.isEmpty() && mining.mineKnownOre(sl, res, spec.count(),
                 new Task(spec, task.tries() + 1), emergency))
@@ -95,7 +110,7 @@ final class MineHandler implements TaskHandler {
             Status s = obsidian(ctx, mob, sl);
             if (s != null) return s;
         }
-        int targetY = Math.max(mob.level().getMinY() + 6, CompanionEntity.oreLevel(res.key()));
+        int targetY = Math.max(mob.level().getMinY() + 6, CompanionGathering.oreLevel(res.key()));
         boolean overworld = mob.level().dimension() == Level.OVERWORLD;
         // Vor dem Abstieg Holz einpacken (Werkbank + Stöcke für neue Werkzeuge unten): sonst baut er sich für einen
         // einzigen Stamm 100 Blöcke wieder hoch
@@ -148,6 +163,10 @@ final class MineHandler implements TaskHandler {
                 if (away.lengthSqr() < 0.01) away = new Vec3(1, 0, 0);
                 away = away.normalize().scale(14);
                 BlockPos spot = BlockPos.containing(mob.getX() + away.x, mob.getY(), mob.getZ() + away.z);
+                // auf den Boden an dieser Stelle (Krater, Hang): sonst ist das Ziel Luft und "unerreichbar"
+                if (sl.hasChunkAt(spot))
+                    spot = new BlockPos(spot.getX(), sl.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                            spot.getX(), spot.getZ()), spot.getZ());
                 mob.logInfo(CompanionTexts.tr("handler.mine.leave_base"));
                 mob.mineDir = Direction.getApproximateNearest(away.x, 0, away.z);
                 mob.replaceCurrent(List.of(Task.moveTo(spot, 9),
@@ -159,6 +178,9 @@ final class MineHandler implements TaskHandler {
         // Nicht in Richtung bekannter Gefahren (Todesort, Explosion, Lava-Unfall) graben
         for (int turn = 0; turn < 3 && mob.memory.dangerous(sl, mob.blockPosition().relative(mob.mineDir, 8), 6); turn++)
             mob.mineDir = mob.mineDir.getClockWise();
+        // Nicht ins Wasser hinein graben (beobachtet: schaute vom Angeln aufs Meer, der Abstieg endete sofort, ohne Meldung)
+        for (int turn = 0; turn < 3 && waterAhead(sl, mob.blockPosition(), mob.mineDir); turn++)
+            mob.mineDir = mob.mineDir.getClockWise();
         int y = mob.blockPosition().getY();
         // tiefster Punkt seines Schachts (ab y=16, nur bei tiefen Erzen) ist seine Mine; neue erst, wenn die alte weit weg ist
         if (overworld && targetY <= 0 && y <= 16 && !mob.level().canSeeSky(mob.blockPosition())) {
@@ -168,6 +190,12 @@ final class MineHandler implements TaskHandler {
                 if (far) mob.logInfo(CompanionTexts.tr("handler.mine.established", mob.blockPosition().toShortString()));
                 mob.setMine(mob.blockPosition());
             }
+        }
+        // Auf Erztiefe: in Richtung noch nicht abgesuchter Felder graben statt durch schon abgesuchtes Gebiet
+        if (overworld && Math.abs(y - targetY) <= 3) {
+            Direction chosen = mob.initiative.mining.direction(mob, sl, mob.mineDir);
+            if (chosen != mob.mineDir) mob.logInfo(CompanionTexts.tr("handler.mine.new_area", CompanionTexts.literal(chosen.getSerializedName())));
+            mob.mineDir = chosen;
         }
         // Die Wegfindung gräbt selbst: bis zu 8 vor und 8 tiefer (Treppe ergibt sich), auf Zielhöhe geradeaus
         int down = Math.max(0, Math.min(8, y - targetY));
@@ -235,7 +263,7 @@ final class MineHandler implements TaskHandler {
             mob.replaceCurrent(pre);
             return Status.REPLACED;
         }
-        List<BlockPos> lava = mob.lavaSources(24);
+        List<BlockPos> lava = mob.portals.lavaSources(24);
         if (!lava.isEmpty()) {
             mob.replaceCurrent(List.of(Task.pour(lava.getFirst()),
                     new Task(new TaskSpec.Gather(spec.resource(), spec.count(), spec.targetTotal()))));
@@ -254,9 +282,15 @@ final class MineHandler implements TaskHandler {
     }
 
     private boolean startOreRun(CompanionEntity mob, ServerLevel sl, MiningKnowledge mining, List<Task> ores) {
+        List<BlockPos> at = new ArrayList<>();
+        for (Task o : ores) if (o.pos() != null) at.add(o.pos());
+        return startOreRunAt(mob, sl, mining, at);
+    }
+
+    private boolean startOreRunAt(CompanionEntity mob, ServerLevel sl, MiningKnowledge mining, List<BlockPos> ores) {
         List<BlockPos> targets = new ArrayList<>();
-        for (Task o : ores)
-            if (o.pos() != null && !mining.blacklisted(o.pos()) && !mob.hazardAround(sl, o.pos(), false)) targets.add(o.pos());
+        for (BlockPos o : ores)
+            if (!mining.blacklisted(o) && !mob.hazardAround(sl, o, false)) targets.add(o);
         if (targets.isEmpty()) return false;
         if (targets.size() > 64) targets = new ArrayList<>(targets.subList(0, 64));
         oreRun = targets;
@@ -278,7 +312,13 @@ final class MineHandler implements TaskHandler {
         }
         List<BlockPos> inReach = oreRun.stream()
                 .filter(p -> mob.getEyePosition().distanceToSqr(Vec3.atCenterOf(p)) <= REACH_SQR).toList();
-        var r = inReach.isEmpty() ? mob.nav.goTo(oreGoal) : Navigator.Result.ARRIVED;
+        Navigator.Result r;
+        if (!inReach.isEmpty()) r = Navigator.Result.ARRIVED;
+        else if (ctx.guardedSupply()) {
+            Status checked = checkOreTrip(ctx, res);
+            if (checked != null) return checked;
+            r = mob.nav.goTo(oreTrip.outboundGoal());
+        } else r = mob.nav.goTo(oreGoal);
         if (r == Navigator.Result.RUNNING) return Status.RUNNING;
         if (r == Navigator.Result.UNREACHABLE) {
             ctx.mining().markUnreachable(oreRun);
@@ -293,19 +333,87 @@ final class MineHandler implements TaskHandler {
         boolean none = next.isEmpty();
         next.add(new Task(spec, task.tries() + (none ? 1 : 0)));
         oreRun = null;
+        resetOreTrip();
         mob.replaceCurrent(next);
         return Status.REPLACED;
     }
 
+    private void resetOreTrip() {
+        oreTrip = null;
+        oreTripTarget = null;
+        oreTripInstalled = false;
+    }
+
+    /**
+     * Geschützter Modus: vor dem Erz-Gang Hin- und Rückweg zum nächsten Erz nachweisen (dieselbe Prüfung wie beim
+     * Kistengang, keine zweite Wegsuche). Der Rückweg darf nichts abbauen oder setzen, also kein Einweg-Abstieg ohne
+     * Ausweg. UNSAFE und UNPROVEN sperren nur dieses Erz, nicht die Methode: Unsicherheit der Suche bestraft das
+     * Bergbauen nicht pauschal. null = Weg nachgewiesen und installiert, weiterlaufen.
+     */
+    private Status checkOreTrip(TaskContext ctx, Resources.Res res) {
+        CompanionEntity mob = ctx.mob();
+        var running = mob.nav.executor();
+        if (oreTrip != null && oreTripTarget != null && !oreRun.contains(oreTripTarget)) {
+            if (running != null && !running.safeToCancel(mob)) return Status.RUNNING; // erst sicher landen
+            mob.nav.stop();
+            resetOreTrip(); // Ziel weg (abgebaut, kein Erz mehr): neu prüfen
+        }
+        if (oreTrip != null && oreTripInstalled && running != null && !running.safeToCancel(mob)) return null;
+        if (oreTrip != null && oreTrip.expired()) {
+            if (running != null && !running.safeToCancel(mob)) return null;
+            mob.nav.stop();
+            resetOreTrip();
+        }
+        if (oreTrip == null) {
+            BlockPos from = mob.blockPosition();
+            oreTripTarget = oreRun.stream().min(java.util.Comparator.comparingDouble(p -> p.distSqr(from))).orElseThrow();
+            mob.getNavigation().stop();
+            mob.nav.stop();
+            oreTrip = new dev.begleiter.nav.RoundTripCheck(mob, oreTripTarget, REACH_SQR);
+        }
+        var status = oreTrip.step();
+        if (status == dev.begleiter.nav.RoundTripCheck.Status.CHECKING) return Status.RUNNING;
+        if (status != dev.begleiter.nav.RoundTripCheck.Status.SAFE) {
+            mob.logInfo(CompanionTexts.tr(status == dev.begleiter.nav.RoundTripCheck.Status.UNSAFE
+                    ? "handler.mine.route_unsafe" : "handler.mine.route_unproven",
+                    CompanionTexts.resource(res.key()), oreTrip.reasonComponent()));
+            ctx.mining().markUnreachable(List.of(oreTripTarget));
+            oreRun.remove(oreTripTarget);
+            resetOreTrip();
+            if (oreRun.isEmpty()) oreRun = null;
+            else oreGoal = oreGoal(oreRun);
+            return Status.RUNNING;
+        }
+        if (!oreTripInstalled) {
+            mob.nav.followChecked(oreTrip.outbound(), oreTrip.outboundContext(), oreTrip.outboundGoal());
+            oreTripInstalled = true;
+        }
+        return null;
+    }
+
     /** Ein Grabstück Richtung Zielhöhe; danach neu umsehen (Erze am Weg nimmt grabPassingOres mit). */
+    private static boolean waterAhead(ServerLevel sl, BlockPos from, Direction dir) {
+        for (int i = 1; i <= 8; i++)
+            for (int dy = -3; dy <= 1; dy++)
+                if (sl.getFluidState(from.relative(dir, i).above(dy)).is(net.minecraft.tags.FluidTags.WATER)) return true;
+        return false;
+    }
+
     private Status continueDig(TaskContext ctx, Resources.Res res) {
         CompanionEntity mob = ctx.mob();
         var r = mob.nav.goTo(new Goal.Block(digTarget));
         if (r == Navigator.Result.RUNNING) return Status.RUNNING;
         if (r == Navigator.Result.UNREACHABLE) {
+            // In alle Richtungen zweimal versperrt (beobachtet: im Packeis 80 Mal in 40 s): aufgeben statt im Kreis drehen
+            if (++ctx.mining().blockedTurns >= 8) {
+                ctx.mining().blockedTurns = 0;
+                mob.problem(CompanionTexts.tr("handler.mine.not_found", CompanionTexts.resource(res.key())));
+                ctx.failChain();
+                return Status.REPLACED;
+            }
             mob.mineDir = mob.mineDir.getClockWise();
             mob.logInfo(CompanionTexts.tr("handler.mine.turn", CompanionTexts.tr("direction." + mob.mineDir.getName())));
-        }
+        } else ctx.mining().blockedTurns = 0;
         digTarget = null;
         List<Task> next = new ArrayList<>(ctx.mining().bonusOres(ctx.level(), res));
         next.add(new Task(spec, task.tries() + 1));

@@ -40,6 +40,17 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
         return model;
     }
     public BuildPreviewModel currentBuildPreviewModel() { return buildPreview == null ? null : buildPreview.model(); }
+    /** Navigation: Zeilenhöhe und sichtbare Zeilen zwischen Kopf und Schließen-Knopf. */
+    private static final int NAV_TOP = 41, NAV_STEP = 17, NAV_ROWS = 10;
+    /** Gemeinsame Auswahl für Bestellungen, Vorrat und Budgets (bleibt beim Seitenwechsel erhalten). */
+    private static net.minecraft.world.item.Item selectedItem = net.minecraft.world.item.Items.TORCH;
+    private static int selectedAmount = 16;
+    /** Enter in einem Eingabefeld der aktuellen Seite. */
+    private Runnable submit;
+    public net.minecraft.world.item.Item selectedItem() { return selectedItem; }
+    public void selectItem(net.minecraft.world.item.Item item) { if (item != null) selectedItem = item; }
+    public int selectedAmount() { return selectedAmount; }
+    public void selectAmount(int amount) { selectedAmount = Math.clamp(amount, 1, dev.begleiter.chat.ChatCount.MAX); }
     public CompanionScreen(CompanionMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title, 310, 238);
     }
@@ -73,21 +84,28 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
             });
             return;
         }
+        var all = ControlPages.all();
+        int current = 0;
+        for (int i = 0; i < all.size(); i++) if (all.get(i).page() == displayed) current = i;
+        // Die gewählte Seite bleibt in der Navigation sichtbar, auch wenn sie per Code geöffnet wurde.
+        if (current < navigationOffset) navigationOffset = current;
+        if (current >= navigationOffset + NAV_ROWS) navigationOffset = current - NAV_ROWS + 1;
+        navigationOffset = Math.clamp(navigationOffset, 0, Math.max(0, all.size() - NAV_ROWS));
         int row = 0;
-        for (var page : ControlPages.all().stream().skip(navigationOffset).limit(8).toList()) {
+        for (var page : all.stream().skip(navigationOffset).limit(NAV_ROWS).toList()) {
             String title = GuiText.page(page.page());
-            button(8, 43 + row++ * 21, 92, title, new ItemStack(page.icon()),
+            button(6, NAV_TOP + row++ * NAV_STEP, 91, NAV_STEP - 1, title, new ItemStack(page.icon()),
                     title, () -> menu.page() == page.page(),
                     () -> send(CompanionMenu.PAGE_BUTTON + page.page().id));
         }
-        // Die Sprache folgt Minecraft; der Fuß unter der achten Navigationszeile (endet bei y=210) bleibt für Schließen.
-        button(8, panelHeight - 24, 92, tr("gui.begleiter.close"), ItemStack.EMPTY, tr("gui.begleiter.close.tooltip"),
+        // Die Sprache folgt Minecraft; der Fuß unter der letzten Navigationszeile bleibt für Schließen.
+        button(6, panelHeight - 22, 92, 16, tr("gui.begleiter.close"), ItemStack.EMPTY, tr("gui.begleiter.close.tooltip"),
                 () -> false, this::onClose);
         var page = ControlPages.get(displayed);
+        submit = null;
         if (page != null) page.init(this);
         // Die Aufgaben-Seite hat Folgen/Warten/Frei schon als große Knöpfe
-        if (displayed != CompanionMenu.Page.INVENTORY && displayed != CompanionMenu.Page.DUTIES
-                && displayed != CompanionMenu.Page.BUILD) {
+        if (page != null && page.quickBar()) {
             actionButton(108, 211, 62, CompanionActions.get(0), false);
             actionButton(173, 211, 62, CompanionActions.get(1), false);
             actionButton(238, 211, 62, CompanionActions.get(2), false);
@@ -158,6 +176,7 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
         addRenderableWidget(new BuildCard(this, index, leftPos + x, topPos + y));
     }
     public CompanionMenu container() { return menu; }
+    public net.minecraft.client.gui.Font uiFont() { return font; }
     public boolean wideBuild() { return panelWidth == 430; }
     public int panelX() { return leftPos; }
     public int panelY() { return topPos; }
@@ -181,8 +200,46 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
     }
     public void button(int x, int y, int width, String label, ItemStack icon, String tooltip,
             java.util.function.BooleanSupplier selected, Runnable action) {
-        addRenderableWidget(new ControlButton(leftPos + x, topPos + y, width,
+        button(x, y, width, 20, label, icon, tooltip, selected, action);
+    }
+    public ControlButton button(int x, int y, int width, int height, String label, ItemStack icon, String tooltip,
+            java.util.function.BooleanSupplier selected, Runnable action) {
+        return addRenderableWidget(new ControlButton(leftPos + x, topPos + y, width, height,
                 label, icon, tooltip, selected, action));
+    }
+    /** Knopf, der einen Chat-Befehl über das Menü ausführt (siehe {@link dev.begleiter.CompanionMenuCommands}). */
+    public ControlButton commandButton(int x, int y, int width, int height, String labelKey, ItemStack icon,
+            java.util.function.Supplier<String> command) {
+        return button(x, y, width, height, tr(labelKey), icon, tr(labelKey + ".tooltip"), () -> false,
+                () -> sendCommand(command.get()));
+    }
+    /** Eingabefeld der Seite; Enter löst {@code onEnter} aus. Buchstaben schließen das Menü nicht. */
+    public net.minecraft.client.gui.components.EditBox editBox(int x, int y, int width, int height, String hint, String value,
+            int maxLength, java.util.function.Consumer<String> changed, Runnable onEnter) {
+        var box = new net.minecraft.client.gui.components.EditBox(font, leftPos + x, topPos + y, width, height, Component.literal(hint));
+        box.setMaxLength(maxLength);
+        box.setHint(Component.literal(hint).withColor(ControlTheme.MUTED));
+        box.setValue(value);
+        box.setResponder(changed::accept);
+        if (onEnter != null) submit = onEnter;
+        return addRenderableWidget(box);
+    }
+    public void sendCommand(String command) { sendCommand(command, false); }
+    public void sendCommand(String command, boolean free) {
+        if (command == null || command.isBlank() || command.length() > dev.begleiter.CompanionMenuCommands.MAX_LENGTH) return;
+        if (net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.canSend(dev.begleiter.CompanionMenuCommands.Run.TYPE))
+            net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.send(
+                    new dev.begleiter.CompanionMenuCommands.Run(menu.containerId, free, command));
+    }
+    /** Karte als Hintergrund für eine Gruppe (relative GUI-Koordinaten), optional mit Überschrift. */
+    public void card(GuiGraphicsExtractor g, int x, int y, int w, int h, String title) {
+        ControlTheme.round(g, leftPos + x, topPos + y, w, h, ControlTheme.CARD, ControlTheme.LINE);
+        if (title != null && !title.isEmpty()) text(g, title, x + 5, y + 4, w - 10, ControlTheme.MUTED);
+    }
+    /** Kleine Überschrift mit Akzentstrich. */
+    public void heading(GuiGraphicsExtractor g, String title, int x, int y, int w) {
+        g.fill(leftPos + x, topPos + y + 1, leftPos + x + 2, topPos + y + 8, ControlTheme.ACCENT);
+        text(g, title, x + 5, y, w - 5, ControlTheme.MUTED);
     }
     public void actionButton(int x, int y, int width, CompanionActions.Action action, boolean strong) {
         String title = GuiText.action(action);
@@ -199,10 +256,11 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
     }
     @Override public void extractContents(GuiGraphicsExtractor g, int mx, int my, float delta) {
         mouseX = mx; mouseY = my;
-        g.fill(0, 0, width, height, 0x99060B10);
+        g.fill(0, 0, width, height, 0xA0060B10);
         int x = leftPos, y = topPos;
-        g.fill(x, y, x + panelWidth, y + panelHeight, ControlTheme.BACKGROUND);
-        g.outline(x, y, panelWidth, panelHeight, ControlTheme.LINE);
+        // Weicher Schatten, abgerundetes Panel
+        ControlTheme.round(g, x - 2, y - 1, panelWidth + 4, panelHeight + 4, 0x40000000, 0);
+        ControlTheme.round(g, x, y, panelWidth, panelHeight, ControlTheme.BACKGROUND, ControlTheme.LINE);
         if (buildPreview != null) {
             buildPreview.render(this, g);
             hoveredSlot = null;
@@ -210,15 +268,7 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
                 renderable.extractRenderState(g, mx, my, delta);
             return;
         }
-        g.fill(x + 1, y + 1, x + panelWidth - 1, y + 36, ControlTheme.PANEL);
-        g.fill(x + 103, y + 40, x + 104, y + panelHeight - 6, ControlTheme.LINE);
-        text(g, data().name(), 10, 7, 188, ControlTheme.TEXT);
-        text(g, GuiText.mode(data().mode()) + (data().paused() ? " · " + tr("gui.begleiter.paused") : ""), 10, 21, 185, ControlTheme.ACCENT);
-        text(g, tr("gui.begleiter.health", Math.round(data().health()), Math.round(data().maxHealth())), panelWidth - 105, 9, 94, ControlTheme.TEXT);
-        g.fill(x + panelWidth - 105, y + 23, x + panelWidth - 11, y + 27, ControlTheme.LINE);
-        int life = (int) (94 * Math.clamp(data().health() / Math.max(1, data().maxHealth()), 0f, 1f));
-        int healthColor = data().health() / Math.max(1f, data().maxHealth()) <= 0.25f ? 0xFFE87979 : ControlTheme.ACCENT;
-        g.fill(x + panelWidth - 105, y + 23, x + panelWidth - 105 + life, y + 27, healthColor);
+        renderHeader(g, x, y);
         var page = ControlPages.get(menu.page());
         if (confirmLogClear) {
             text(g, tr("gui.begleiter.log.confirm.title"), 112, 77, 184, ControlTheme.TEXT);
@@ -234,6 +284,44 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
                 renderable.extractRenderState(g, mx, my, delta);
         } else super.extractContents(g, mx, my, delta);
     }
+    /** Kopf: Name, Seite, Modus-Chip, Leben und Hunger; Navigation mit Bildlaufleiste. */
+    private void renderHeader(GuiGraphicsExtractor g, int x, int y) {
+        ControlTheme.gradient(g, x + 1, y + 1, panelWidth - 2, 34, ControlTheme.HEADER_TOP, ControlTheme.HEADER_BOTTOM);
+        g.fill(x + 1, y + 35, x + panelWidth - 1, y + 36, ControlTheme.ACCENT_DARK);
+        String name = data().name();
+        int nameWidth = Math.min(font.width(name), 120);
+        text(g, name, 10, 7, 120, ControlTheme.TEXT);
+        var current = ControlPages.get(menu.page());
+        if (current != null) text(g, "› " + GuiText.page(current.page()), 14 + nameWidth, 7, 186 - 14 - nameWidth, ControlTheme.MUTED);
+        String mode = GuiText.mode(data().mode()) + (data().paused() ? " · " + tr("gui.begleiter.paused") : "");
+        int chip = Math.min(font.width(mode) + 10, 180);
+        ControlTheme.round(g, x + 8, y + 19, chip, 12, data().paused() ? 0xFF3A3220 : 0xFF1C3B36, 0);
+        text(g, mode, 13, 21, chip - 8, data().paused() ? ControlTheme.WARN : ControlTheme.ACCENT);
+        int bx = panelWidth - 108, bw = 98;
+        float health = Math.clamp(data().health() / Math.max(1f, data().maxHealth()), 0f, 1f);
+        text(g, tr("gui.begleiter.health", Math.round(data().health()), Math.round(data().maxHealth())), bx, 6, bw, ControlTheme.TEXT);
+        bar(g, x + bx, y + 16, bw, health, health <= 0.25f ? ControlTheme.DANGER : ControlTheme.ACCENT);
+        float hunger = Math.clamp(data().hunger() / 20f, 0f, 1f);
+        text(g, tr("gui.begleiter.header.hunger", data().hunger()), bx, 21, bw, ControlTheme.MUTED);
+        bar(g, x + bx, y + 31, bw, hunger, hunger <= 0.3f ? ControlTheme.DANGER : ControlTheme.WARN);
+        // Navigationsspalte
+        ControlTheme.round(g, x + 3, y + 39, 98, panelHeight - 42, ControlTheme.CARD, 0);
+        int pages = ControlPages.all().size();
+        if (pages > NAV_ROWS) {
+            int trackTop = y + NAV_TOP, trackHeight = NAV_ROWS * NAV_STEP - 1;
+            int thumb = Math.max(12, trackHeight * NAV_ROWS / pages);
+            int thumbTop = trackTop + (trackHeight - thumb) * navigationOffset / Math.max(1, pages - NAV_ROWS);
+            g.fill(x + 98, trackTop, x + 100, trackTop + trackHeight, 0xFF3A5266);
+            g.fill(x + 98, thumbTop, x + 100, thumbTop + thumb, ControlTheme.ACCENT);
+        }
+    }
+
+    private void bar(GuiGraphicsExtractor g, int left, int top, int width, float value, int color) {
+        g.fill(left, top, left + width, top + 3, 0xFF0D141A);
+        int filled = Math.round(width * value);
+        if (filled > 0) g.fill(left, top, left + filled, top + 3, color);
+    }
+
     @Override protected void extractLabels(GuiGraphicsExtractor g, int mx, int my) {}
     @Override protected void extractSlots(GuiGraphicsExtractor g, int mx, int my) {
         if (!confirmLogClear && buildPreview == null) super.extractSlots(g, mx, my);
@@ -258,6 +346,11 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
             for (var child : children()) if (child.mouseClicked(event, doubleClick)) return true;
             return true;
         }
+        var page = ControlPages.get(displayed);
+        if (page != null && page.mouseClicked(this, event.x() - leftPos, event.y() - topPos, event.button())) {
+            if (getFocused() instanceof net.minecraft.client.gui.components.EditBox box) { box.setFocused(false); setFocused(null); }
+            return true;
+        }
         return super.mouseClicked(event, doubleClick);
     }
     @Override public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
@@ -275,6 +368,19 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
         if (confirmLogClear && event.key() == com.mojang.blaze3d.platform.InputConstants.KEY_ESCAPE) {
             confirmLogClear = false; buildPage(); return true;
         }
+        if (getFocused() instanceof net.minecraft.client.gui.components.EditBox box && box.isFocused()) {
+            int key = event.key();
+            if (key == com.mojang.blaze3d.platform.InputConstants.KEY_ESCAPE) {
+                box.setFocused(false); setFocused(null); return true;
+            }
+            if ((key == com.mojang.blaze3d.platform.InputConstants.KEY_RETURN
+                    || key == com.mojang.blaze3d.platform.InputConstants.KEY_NUMPADENTER) && submit != null) {
+                submit.run(); return true;
+            }
+            // Alle übrigen Tasten gehören dem Feld: "E" oder Hotbar-Ziffern dürfen das Menü nicht schließen.
+            box.keyPressed(event);
+            return true;
+        }
         return super.keyPressed(event);
     }
     @Override public boolean mouseScrolled(double x, double y, double horizontal, double vertical) {
@@ -283,11 +389,14 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
             return true;
         }
         if (!confirmLogClear && vertical != 0 && x >= leftPos && x < leftPos + 104
-                && y >= topPos + 40 && y < topPos + 212 && ControlPages.all().size() > 8) {
-            navigationOffset = Math.clamp(navigationOffset + (vertical < 0 ? 1 : -1), 0, ControlPages.all().size() - 8);
+                && y >= topPos + 40 && y < topPos + NAV_TOP + NAV_ROWS * NAV_STEP && ControlPages.all().size() > NAV_ROWS) {
+            navigationOffset = Math.clamp(navigationOffset + (vertical < 0 ? 1 : -1), 0, ControlPages.all().size() - NAV_ROWS);
             buildPage();
             return true;
         }
+        var page = ControlPages.get(displayed);
+        if (!confirmLogClear && vertical != 0 && page != null && page.mouseScrolled(this, x - leftPos, y - topPos, vertical))
+            return true;
         return super.mouseScrolled(x, y, horizontal, vertical);
     }
     @Override public boolean mouseDragged(net.minecraft.client.input.MouseButtonEvent event, double dx, double dy) {
@@ -343,8 +452,12 @@ public final class CompanionScreen extends AbstractContainerScreen<CompanionMenu
         if (!stack.isEmpty()) g.setTooltipForNextFrame(font, stack, mx, my);
         else if (!emptyTip.isEmpty()) g.setTooltipForNextFrame(font, Component.literal(emptyTip), mx, my);
     }
+    /** Letzte Antwort des Begleiters als Sprechblase; zu lange Antworten stehen vollständig im Tooltip und im Chat. */
     public void feedback(GuiGraphicsExtractor g, int y) {
-        paragraph(g, data().feedback().isEmpty() ? tr("gui.begleiter.feedback.ready") : data().feedback(),
-                110, y, 188, 2, ControlTheme.ACCENT);
+        String text = data().feedback().isEmpty() ? tr("gui.begleiter.feedback.ready") : data().feedback();
+        int lines = Math.min(2, font.split(Component.literal(text), 184).size());
+        ControlTheme.round(g, leftPos + 107, topPos + y - 3, 196, lines * 11 + 5, 0xFF132A27, 0);
+        g.fill(leftPos + 107, topPos + y - 2, leftPos + 109, topPos + y + lines * 11, ControlTheme.ACCENT);
+        paragraph(g, text, 113, y, 184, 2, ControlTheme.ACCENT);
     }
 }

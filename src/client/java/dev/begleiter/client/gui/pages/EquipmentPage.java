@@ -11,7 +11,7 @@ public final class EquipmentPage implements ControlPage {
     public Page page() { return Page.EQUIPMENT; }
     public Item icon() { return Items.IRON_CHESTPLATE; }
     public void render(CompanionScreen s, GuiGraphicsExtractor g, int mx, int my) {
-        s.text(g, s.tr("gui.begleiter.equipment.heading"), 110, 45, 188, ControlTheme.MUTED);
+        s.heading(g, s.tr("gui.begleiter.equipment.heading"), 108, 44, 194);
         String[] labels = {"head", "chest", "legs", "feet", "mainhand", "offhand"};
         EquipmentSlot[] slots = {EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET,
                 EquipmentSlot.MAINHAND, EquipmentSlot.OFFHAND};

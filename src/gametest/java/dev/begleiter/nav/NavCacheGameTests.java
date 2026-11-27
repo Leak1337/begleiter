@@ -10,6 +10,27 @@ import dev.begleiter.CompanionEntity;
 import dev.begleiter.CompanionMod;
 
 public class NavCacheGameTests {
+    @GameTest public void sectionCacheReusesAlternatingSectionsWithoutChangingStates(GameTestHelper h) {
+        BlockPos p = target(h);
+        BlockPos q = p.offset(16, 0, 0);
+        h.getLevel().getChunk(q.getX() >> 4, q.getZ() >> 4);
+        var cache = new BlockCache(h.getLevel(), java.util.Map.of(), true, true);
+        var reference = new BlockCache(h.getLevel(), java.util.Map.of(), true, false);
+        cache.beginSearch(); reference.beginSearch();
+        for (int i = 0; i < 32; i++) {
+            BlockPos at = i % 2 == 0 ? p : q;
+            h.assertTrue(cache.get(at.getX(), at.getY(), at.getZ()) == reference.get(at.getX(), at.getY(), at.getZ()),
+                    "Section lookup changed the block state");
+        }
+        h.assertValueEqual(cache.chunkLookups, 2L, "Alternating sections should reuse the loaded chunks");
+        h.assertValueEqual(reference.chunkLookups, 32L, "Reference did not alternate chunks");
+        cache.endSearch(false);
+        cache.beginSearch();
+        h.setBlock(2, 1, 2, Blocks.MAGMA_BLOCK);
+        h.assertTrue(cache.get(p.getX(), p.getY(), p.getZ()).is(Blocks.MAGMA_BLOCK), "New section slice kept an obsolete state");
+        h.succeed();
+    }
+
     private static NavContext context(GameTestHelper h) {
         var mob = CompanionMod.COMPANION.create(h.getLevel(), net.minecraft.world.entity.EntitySpawnReason.COMMAND);
         h.assertTrue(mob != null, "Testbegleiter fehlt");

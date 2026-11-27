@@ -31,7 +31,7 @@ public final class MotionController {
         if (!claim(next)) return false;
         commands = 1;
         mob.getMoveControl().setWantedPosition(x, y, z, speed);
-        mob.setSprinting(sprint && mob.hunger > 6 && !mob.isInWater());
+        mob.setSprinting(sprint && mob.food.level() > 6 && !mob.isInWater());
         return true;
     }
     public void notePathWaterGoal(BlockPos target) { pathWaterGoal = target; waterGoalTick = mob.tickCount; }

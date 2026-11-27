@@ -11,6 +11,7 @@ import net.minecraft.world.item.Items;
 
 /** Grundmodi und sieben wiederkehrende Jobs; die Karte liegt direkt bei den Aufgaben. */
 public final class DutiesPage implements ControlPage {
+    @Override public boolean quickBar() { return false; }
     private int tab;
     private static final int[][] ACTIONS = {{2, 0, 1, 40, 41}, {37, 38, 43, 42, 39}};
     private static final String[][] KEYS = {{"free", "follow", "stay", "explore", "base"}, {"farm", "animals", "fetch", "storage", "trade"}};
@@ -31,5 +32,5 @@ public final class DutiesPage implements ControlPage {
         }
         s.actionButton(108, 186, 192, CompanionActions.get(44), false);
     }
-    public void render(CompanionScreen s, GuiGraphicsExtractor g, int mx, int my) { s.feedback(g, 211); }
+    public void render(CompanionScreen s, GuiGraphicsExtractor g, int mx, int my) { s.feedback(g, 213); }
 }

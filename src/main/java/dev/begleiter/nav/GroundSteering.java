@@ -61,7 +61,7 @@ final class GroundSteering {
         double wanted = waiting ? 0 : error > 65 ? 0.65 : error > 35 ? 0.9 : Movement.WALK_SPEED;
         if (!actionAhead && end == path.length() && remaining < 1.3) wanted = Math.min(wanted, Math.max(0.55, remaining));
         speed += Math.max(-0.22, Math.min(0.12, wanted - speed));
-        boolean wantSprint = !waiting && avoidance == null && ctx.canSprint && mob.hunger > 6 && error < 40 && (remaining > 1.2 || flowingTransition);
+        boolean wantSprint = !waiting && avoidance == null && ctx.canSprint && mob.food.level() > 6 && error < 40 && (remaining > 1.2 || flowingTransition);
         if (!wantSprint || mob.tickCount - (long) lastSprintChange >= 4) {
             if (sprint != wantSprint) lastSprintChange = mob.tickCount;
             sprint = wantSprint;

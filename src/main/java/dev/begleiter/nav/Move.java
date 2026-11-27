@@ -99,7 +99,8 @@ public enum Move {
     private static int fl(NavContext c, int x, int y, int z) { return c.blocks.flags(x, y, z); }
     private static boolean pass(NavContext c, int x, int y, int z) {
         int f = fl(c, x, y, z);
-        return has(f, PASS) || (c.allowPortal && has(f, PORTAL));
+        return has(f, PASS) || (c.allowPortal && has(f, PORTAL))
+                || (has(f, END_PORTAL) && c.canEnterEndPortal(x, y, z));
     }
     private static boolean standable(int f) { return has(f, STAND) && !has(f, AVOID_INTO); }
     private static boolean standable(NavContext c, int x, int y, int z) { return standable(fl(c, x, y, z)); }

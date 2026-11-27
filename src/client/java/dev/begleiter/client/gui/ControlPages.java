@@ -13,14 +13,19 @@ public final class ControlPages {
     static {
         register(new OverviewPage());
         register(new DutiesPage());
+        register(new OrdersPage());
         register(new ActionsPage());
+        register(new WorkPage());
+        register(new AdventurePage());
+        register(new BuildPage());
+        register(new WaypointsPage());
         register(new InventoryPage());
         register(new EquipmentPage());
         register(new CombatPage());
         register(new StatusPage());
-        register(new DebugPage());
-        register(new BuildPage());
+        register(new TalkPage());
         register(new PanelPage(Page.LOG, Items.BOOK, "gui.begleiter.log.heading", "gui.begleiter.log.hint"));
+        register(new DebugPage());
     }
     private ControlPages() {}
     public static void register(ControlPage page) {

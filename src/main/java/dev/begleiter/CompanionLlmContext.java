@@ -62,13 +62,13 @@ final class CompanionLlmContext {
 
         String build = c.build == null ? null : c.build.name + (c.build.paused ? " (paused)" : "");
         var lastPlan = c.planFeedback.last();
-        String hazard = c.hazardText();
+        String hazard = c.hazards.text();
         int ownerDistance = owner == null || owner.level() != level ? -1 : (int) Math.sqrt(owner.distanceToSqr(c));
 
         return new ContextSnapshot(c.modeText() + (c.isPaused() ? " (paused)" : ""), (int) c.getHealth(),
-                (int) c.getMaxHealth(), c.hunger, level.dimension().identifier().getPath(), level.isDarkOutside(),
+                (int) c.getMaxHealth(), c.food.level(), level.dimension().identifier().getPath(), level.isDarkOutside(),
                 level.isRaining(), ownerDistance, tasks, c.taskCount(), inventory, equipment,
-                threats, CompanionEntity.NO_HAZARD.equals(hazard) ? null : hazard, c.getHome() != null, build, waypoints,
+                threats, CompanionHazards.NO_HAZARD.equals(hazard) ? null : hazard, c.getHome() != null, build, waypoints,
                 places, lastPlan == null ? null : lastPlan.toString(), c.problemText);
     }
 

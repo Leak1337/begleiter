@@ -386,12 +386,34 @@ public final class CompanionSchematics {
         return n.endsWith(".nbt") || n.endsWith(".schem") || n.endsWith(".litematic") || n.endsWith(".schematic");
     }
 
+    /** Ordnerinhalt kurz merken: Menü und Chat fragen oft mehrmals hintereinander. */
+    static final long LIST_CACHE_MILLIS = 2000;
+    static final int MAX_LISTED = 4096;
+    private static volatile List<Path> listed;
+    private static volatile long listedAt;
+
     public static List<Path> list() {
+        long now = System.currentTimeMillis();
+        List<Path> cached = listed;
+        if (cached != null && now - listedAt < LIST_CACHE_MILLIS) return cached;
+        cached = List.copyOf(scan());
+        listed = cached;
+        listedAt = now;
+        return cached;
+    }
+
+    /** Nach Änderungen am Ordner sofort neu einlesen. */
+    static void forgetList() {
+        listed = null;
+    }
+
+    private static List<Path> scan() {
         List<Path> out = new ArrayList<>();
         for (Path dir : folders()) {
             if (!Files.isDirectory(dir)) continue;
             try (Stream<Path> s = Files.walk(dir, 3)) {
-                s.filter(Files::isRegularFile).filter(CompanionSchematics::supported).forEach(out::add);
+                s.filter(Files::isRegularFile).filter(CompanionSchematics::supported)
+                        .limit(Math.max(0, MAX_LISTED - out.size())).forEach(out::add);
             } catch (IOException | java.io.UncheckedIOException unreadable) {
                 // Nicht lesbarer Ordner (Rechte, gelöschte Datei während des Durchlaufs): wie leer behandeln.
             }
@@ -408,13 +430,22 @@ public final class CompanionSchematics {
     /** Datei zu einem Namen: exakt (ohne Endung) oder enthält den Namen. */
     public static Path find(String name) {
         String want = CompanionBrain.normalize(name).replace(" ", "");
-        Path partial = null;
-        for (Path p : list()) {
-            String b = CompanionBrain.normalize(baseName(p)).replace(" ", "");
-            if (b.equals(want)) return p;
-            if (partial == null && !want.isEmpty() && b.contains(want)) partial = p;
-        }
-        return partial;
+        Path exact = exact(list(), want);
+        if (exact != null) return exact;
+        // Gerade erst in den Ordner gelegt? Die gemerkte Liste kann bis zu 2 s alt sein: einmal frisch einlesen.
+        forgetList();
+        List<Path> fresh = list();
+        exact = exact(fresh, want);
+        if (exact != null) return exact;
+        for (Path p : fresh)
+            if (!want.isEmpty() && CompanionBrain.normalize(baseName(p)).replace(" ", "").contains(want)) return p;
+        return null;
+    }
+
+    private static Path exact(List<Path> files, String want) {
+        for (Path p : files)
+            if (CompanionBrain.normalize(baseName(p)).replace(" ", "").equals(want)) return p;
+        return null;
     }
 
     /** Blockzustände, die sich beim letzten Laden (dieses Threads) nicht lesen ließen und zu Luft wurden. */
@@ -425,9 +456,24 @@ public final class CompanionSchematics {
     }
 
     public static Schematic load(ServerLevel sl, Path file) throws IOException {
+        return parse(sl, file, readChecked(file));
+    }
+
+    /** Ohne Lesen prüfbar: vorhanden, normale Datei, höchstens 16 MiB komprimiert. */
+    static void checkFile(Path file) throws IOException {
+        if (!Files.isRegularFile(file)) throw new java.nio.file.NoSuchFileException(file.toString());
         if (Files.size(file) > MAX_COMPRESSED_BYTES)
             throw new IOException("Schematic compressed file exceeds 16 MiB");
-        CompoundTag t = readNbt(file);
+    }
+
+    /** Nur IO (darf außerhalb des Serverthreads laufen): Grenzen prüfen, lesen und entpacken. */
+    static CompoundTag readChecked(Path file) throws IOException {
+        checkFile(file);
+        return readNbt(file);
+    }
+
+    /** Weltgebundener Teil (Serverthread): NBT in Blockzustände, Daten und Lebewesen übersetzen. */
+    static Schematic parse(ServerLevel sl, Path file, CompoundTag t) throws IOException {
         HolderLookup.RegistryLookup<Block> blocks = sl.registryAccess().lookupOrThrow(Registries.BLOCK);
         String n = file.getFileName().toString().toLowerCase(Locale.ROOT);
         String name = baseName(file);

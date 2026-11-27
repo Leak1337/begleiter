@@ -74,7 +74,7 @@ public class PlacementGameTests {
             var c = companion(h, f);
             BlockPos w = water(h);
             c.giveToInventory(new ItemStack(Items.BUCKET));
-            h.assertTrue(!c.fillBucket(h.getLevel(), w), f + ": Füllen trotz Ablehnung gemeldet");
+            h.assertTrue(!c.portals.fillBucket(h.getLevel(), w), f + ": Füllen trotz Ablehnung gemeldet");
             h.assertValueEqual(count(c, Items.BUCKET), 1, f + ": leerer Eimer");
             h.assertValueEqual(count(c, Items.WATER_BUCKET), 0, f + ": Wasser aus dem Nichts");
             h.assertTrue(h.getLevel().getFluidState(w).isSource(), f + ": Quelle verschwunden");
@@ -87,7 +87,7 @@ public class PlacementGameTests {
         var c = companion(h, Fault.NONE);
         BlockPos w = water(h);
         c.giveToInventory(new ItemStack(Items.BUCKET));
-        h.assertTrue(c.fillBucket(h.getLevel(), w), "Füllen fehlgeschlagen");
+        h.assertTrue(c.portals.fillBucket(h.getLevel(), w), "Füllen fehlgeschlagen");
         h.assertValueEqual(count(c, Items.BUCKET), 0, "leerer Eimer");
         h.assertValueEqual(count(c, Items.WATER_BUCKET), 1, "Wassereimer");
         h.assertTrue(h.getLevel().getBlockState(w).isAir(), "Quelle noch da");
@@ -100,7 +100,7 @@ public class PlacementGameTests {
         h.setBlock(5, 1, 5, Blocks.LAVA);
         BlockPos lava = h.absolutePos(new BlockPos(5, 1, 5));
         c.giveToInventory(new ItemStack(Items.WATER_BUCKET));
-        h.assertTrue(c.pourWater(h.getLevel(), lava).isEmpty(), "Obsidian gezählt, obwohl nichts gesetzt wurde");
+        h.assertTrue(c.portals.pourWater(h.getLevel(), lava).isEmpty(), "Obsidian gezählt, obwohl nichts gesetzt wurde");
         h.assertTrue(h.getLevel().getFluidState(lava).isSource(), "Lava verändert");
         h.succeed();
     }

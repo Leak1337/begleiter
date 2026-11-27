@@ -40,6 +40,8 @@ final class CraftHandler implements TaskHandler {
                 ctx.abortAutonomousPlan(DecisionOutcome.Reason.MISSING_STATION);
                 return Status.REPLACED;
             }
+            if (table == null && mob.recoverRecipeProduction(
+                    CompanionTexts.tr("handler.craft.no_table", CompanionTexts.item(id)))) return Status.REPLACED;
             // Wie ein Spieler: Werkbank dabei (oder schnell gemacht) -> hier aufstellen statt weit zurückzulaufen
             boolean far = table == null || table.distSqr(mob.blockPosition()) > 12 * 12;
             if (far && !ctx.guardedSupply() && task.tries() < 4 && mob.canCarryStation("crafting_table")) {

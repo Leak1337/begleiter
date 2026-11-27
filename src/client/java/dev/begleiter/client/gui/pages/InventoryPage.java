@@ -7,6 +7,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 
 public final class InventoryPage implements ControlPage {
+    @Override public boolean quickBar() { return false; }
     public Page page() { return Page.INVENTORY; }
     public Item icon() { return Items.CHEST; }
     public void render(CompanionScreen s, GuiGraphicsExtractor g, int mx, int my) {

@@ -35,6 +35,16 @@ final class CompanionChatActions {
     }
 
     static Component interpretReply(ServerPlayer player, CompanionEntity c, String text, String language) {
+        Component journey = c.journey.interpret(player, text);
+        if (journey != null) return journey;
+        Component work = c.work.interpret(player, text);
+        if (work != null) return work;
+        Component stock = CompanionStockRoutine.interpret(player, c, text);
+        if (stock != null) return stock;
+        Component homeOrder = CompanionRequests.homeOrder(player, c, text);
+        if (homeOrder != null) return homeOrder;
+        Component habit = c.initiative.habits.answer(c, player, text);
+        if (habit != null) return habit;
         Sentence sentence = Sentence.of(text);
         var parsed = ChatParser.parse(text, language);
         boolean control = parsed != null && parsed.intents().stream().anyMatch(intent -> java.util.Set.of(
@@ -53,6 +63,19 @@ final class CompanionChatActions {
         Component reply = apply(player, c, parsed, sentence, Source.LEXICON);
         clearOldQuestion(c, parsed, reply, revision);
         return reply == null ? c.requestDialogue.waitingReply(player, c) : reply;
+    }
+
+    /** Wiederholte Bestellung desselben Items: Vorschlag für eine Vorratsregel an die Antwort hängen. */
+    private static Component withHabit(ServerPlayer player, CompanionEntity c, Component reply, Item item, int count) {
+        if (reply == null) return null;
+        Component suggestion = c.initiative.habits.note(c, player, item, count);
+        return suggestion == null ? reply : reply.copy().append(" ").append(suggestion);
+    }
+
+    /** Menüauftrag "bring mir": derselbe Weg wie ein erkannter Satz mit eindeutigem Item. */
+    static Component menuObtain(ServerPlayer player, CompanionEntity c, Item item, int count) {
+        c.requestDialogue.clear();
+        return withHabit(player, c, CompanionBrain.orderObtainReply(c, item, count, true), item, count);
     }
 
     private static void clearOldQuestion(CompanionEntity c, ChatParser.Result parsed, Component reply, long revision) {
@@ -76,6 +99,10 @@ final class CompanionChatActions {
         for (ChatIntent intent : parsed.intents()) {
             Component reply;
             switch (intent) {
+                case TALK_LESS, TALK_MORE -> {
+                    var level = c.talk.change(intent == ChatIntent.TALK_MORE ? 1 : -1);
+                    return CompanionTexts.tr("reply.talk", CompanionTexts.tr("talk." + level.name().toLowerCase(java.util.Locale.ROOT)));
+                }
                 case WAYPOINT_SAVE, WAYPOINT_FORGET, WAYPOINT_LIST, WAYPOINT_GO -> {
                     // Wegpunkte sucht waypoint() im Satz; beim LLM ist der genannte Name der ganze "Satz".
                     reply = waypoint(player, c, intent, source.llm() ? Sentence.of(params.waypoint()) : sentence, params);
@@ -107,7 +134,23 @@ final class CompanionChatActions {
                     c.cancelOrders();
                     return CompanionTexts.tr(hadBuild ? "reply.cancel_build" : "reply.cancel");
                 }
-                case PAUSE -> { if (c.build != null) return CompanionBrain.pauseBuildReply(c, true); }
+                case PAUSE -> {
+                    if (c.journey.active() && (c.journey.running() || !c.hasTasks())) {
+                        c.cancelAll();
+                        c.stay();
+                        return c.journey.status();
+                    }
+                    if (c.work.enabled() && !c.hasTasks() || c.work.active()) {
+                        c.work.suspend();
+                        return CompanionTexts.tr("work.disabled");
+                    }
+                    if (c.hasRecipeRequest()) {
+                        var message = CompanionTexts.tr("order.held");
+                        c.holdRecipeOrders(message);
+                        return message;
+                    }
+                    if (c.build != null) return CompanionBrain.pauseBuildReply(c, true);
+                }
                 case RESUME -> {
                     if (c.isPaused() || c.build != null && c.build.paused) return CompanionBrain.resumeReply(c);
                 }
@@ -122,6 +165,7 @@ final class CompanionChatActions {
                 case BREED -> {
                     return CompanionBrain.orderBreedReply(c, "any".equals(params.mob()) ? null : params.mob(), params.countOr(0));
                 }
+                case FISH -> { return CompanionBrain.orderFishReply(c, params.countOr(0)); }
                 case REPAIR -> { return CompanionBrain.orderRepairReply(c); }
                 case TRADE -> {
                     var what = sentence.after(parsed.language().equals("de") ? "gegen" : "for");
@@ -165,12 +209,13 @@ final class CompanionChatActions {
                     return CompanionTexts.tr("order.give.resource", CompanionTexts.resource(resource.key()));
                 }
                 case MATERIALS_FOR, CRAFT_FOR_OWNER -> {
-                    return CompanionRequests.order(c, params, intent == ChatIntent.MATERIALS_FOR);
+                    reply = CompanionRequests.order(c, params, intent == ChatIntent.MATERIALS_FOR);
+                    return intent == ChatIntent.CRAFT_FOR_OWNER ? withHabit(player, c, reply, item(params.item(), itemWords), params.countOr(1)) : reply;
                 }
                 case OBTAIN -> {
                     Item wanted = item(params.item(), itemWords);
                     if (wanted != null && (resource == null || CompanionBuilder.rawSource(wanted) == null || CompanionBrain.isTool(wanted)))
-                        return CompanionBrain.orderObtainReply(c, wanted, params.countOr(1), true);
+                        return withHabit(player, c, CompanionBrain.orderObtainReply(c, wanted, params.countOr(1), true), wanted, params.countOr(1));
                 }
                 case GATHER -> {
                     if (resource != null) return CompanionBrain.orderGatherReply(c, resource, params.countOr(16), params.toOwner());

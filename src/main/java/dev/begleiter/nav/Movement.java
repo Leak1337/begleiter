@@ -174,7 +174,7 @@ public final class Movement {
         // 1. Hindernisse abbauen (eins nach dem anderen); Türen, Leitern und Wasser bleiben
         for (BlockPos b : breaks) {
             if (pass(sl, b) || openable(sl, b) || !sl.getFluidState(b).isEmpty()
-                    || BlockFlags.has(BlockFlags.of(sl.getBlockState(b)), BlockFlags.PORTAL)) continue;
+                    || BlockFlags.has(BlockFlags.of(sl.getBlockState(b)), BlockFlags.PORTAL | BlockFlags.END_PORTAL)) continue;
             worked = true;
             return breakStep(mob, ctx, sl, b);
         }
@@ -190,7 +190,7 @@ public final class Movement {
                 // Redstone-Teile oder anderes Gebautes eines Spielers bleiben, die Suche plant dann neu.
                 if (there.getDestroySpeed(sl, place) == 0 && there.getCollisionShape(sl, place).isEmpty()
                         && (ctx.mayBreak(there, BlockFlags.of(there)) || plainTorch(there))) {
-                    sl.destroyBlock(place, true, mob);
+                    if (!mob.worldBreak(sl, place, true)) return fail(CompanionTexts.tr("nav.failure.placement_blocked"));
                     return Status.RUNNING;
                 }
                 return fail(CompanionTexts.tr("nav.failure.placement_blocked"));
@@ -360,6 +360,7 @@ public final class Movement {
 
     /** Geschlossene Holztür/Zauntor öffnen (wie ein Spieler per Rechtsklick). */
     private static void open(CompanionEntity mob, ServerLevel sl, BlockPos p) {
+        if (!mob.mayUse(sl, p)) return;
         BlockState s = sl.getBlockState(p);
         if (s.getBlock() instanceof net.minecraft.world.level.block.DoorBlock door && openable(sl, p)
                 && !s.getValue(net.minecraft.world.level.block.DoorBlock.OPEN)) {

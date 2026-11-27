@@ -27,7 +27,8 @@ public class CommandParityGameTests {
             Map.entry("lager", "home"), Map.entry("lagerverwalter", "keeper"), Map.entry("sammeln", "gather"),
             Map.entry("bauen", "build"), Map.entry("plattform", "platform"), Map.entry("wand", "wall"),
             Map.entry("breite", "width"), Map.entry("hoehe", "height"), Map.entry("tiefe", "depth"),
-            Map.entry("freiraeumen", "clear"));
+            Map.entry("freiraeumen", "clear"),
+            Map.entry("einstellungen", "config"), Map.entry("aktualisieren", "reload"));
 
     private static CommandNode<CommandSourceStack> root(GameTestHelper h, String name) {
         return h.getLevel().getServer().getCommands().getDispatcher().getRoot().getChild(name);

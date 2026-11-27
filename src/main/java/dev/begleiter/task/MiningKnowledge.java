@@ -1,5 +1,6 @@
 package dev.begleiter.task;
 
+import dev.begleiter.world.SafeLevel;
 import dev.begleiter.debug.BotDebug.EventKind;
 import dev.begleiter.CompanionTexts;
 import net.minecraft.network.chat.Component;
@@ -21,6 +22,7 @@ import net.minecraft.world.phys.Vec3;
 
 import dev.begleiter.CompanionCraft;
 import dev.begleiter.CompanionEntity;
+import dev.begleiter.CompanionGathering;
 import dev.begleiter.CompanionEntity.Task;
 import dev.begleiter.CompanionMemory;
 import dev.begleiter.Resources;
@@ -47,6 +49,8 @@ public final class MiningKnowledge {
     boolean mineTrip;
     /** Holz für den Abstieg schon einmal geholt (nicht endlos, falls kein Baum in der Nähe ist). */
     boolean woodForMineTried;
+    /** Versperrte Grabrichtungen in Folge (über neue Mine-Instanzen hinweg). */
+    int blockedTurns;
 
     public MiningKnowledge(CompanionEntity mob) {
         this.mob = mob;
@@ -68,15 +72,15 @@ public final class MiningKnowledge {
         Vec3 eye = mob.getEyePosition();
         for (BlockPos q : BlockPos.betweenClosed(c.offset(-5, -3, -5), c.offset(5, 4, 5))) {
             if (out.size() >= 4) break;
-            BlockState s = sl.getBlockState(q);
-            if (!s.is(BlockTags.ORES) || eye.distanceToSqr(Vec3.atCenterOf(q)) > maxEyeDistSqr) continue;
+            BlockState s = SafeLevel.state(sl, q);
+            if (s == null || !s.is(BlockTags.ORES) || eye.distanceToSqr(Vec3.atCenterOf(q)) > maxEyeDistSqr) continue;
             Resources.Res res = null;
             for (Resources.Res r : BONUS_ORES) if (r.block().test(s)) { res = r; break; }
             if (res == null || res == except || !mob.hasCorrectToolFor(s) || plentyOf(res)) continue;
             // nicht für Nebenbei-Erze nach oben klettern, wenn er eigentlich tiefer will
             if (except != null && q.getY() > c.getY() + 2) continue;
             BlockPos p = q.immutable();
-            if (oresTried.contains(p) || mob.hazardAround(sl, p, false) || CompanionEntity.deepWater(sl, p) || !mob.seesBlock(sl, p)) continue;
+            if (oresTried.contains(p) || mob.hazardAround(sl, p, false) || CompanionGathering.deepWater(sl, p) || !mob.seesBlock(sl, p)) continue;
             oresTried.add(p);
             out.add(Task.breakAt(p, s.getBlock()));
         }
@@ -128,14 +132,30 @@ public final class MiningKnowledge {
      * true = Warteschlange ersetzt.
      */
     boolean mineKnownOre(ServerLevel sl, Resources.Res res, int want, Task again, boolean allowDive) {
+        CompanionMemory.Place far = mob.memory.nearest(CompanionMemory.Kind.ORE, res.key(), sl, mob.blockPosition(), 160);
+        if (far != null && far.pos.distSqr(mob.blockPosition()) > 40 * 40)
+            return goRemembered(sl, CompanionMemory.Kind.ORE, res.key(), 160, again);
+        List<BlockPos> vein = knownVein(sl, res, allowDive);
+        if (vein.isEmpty()) return false;
+        List<Task> next = new ArrayList<>();
+        for (int i = 0; i < Math.min(vein.size(), want); i++) next.add(Task.breakAt(vein.get(i), sl.getBlockState(vein.get(i)).getBlock()));
+        if (again.spec() instanceof TaskSpec.ResourceGoal) next.add(again);
+        mob.replaceCurrent(next);
+        return true;
+    }
+
+    /**
+     * Nahe gespürte Ader (bis 40 Blöcke) als Erzstellen, nächste zuerst; leer = keine. Vergisst verschwundene oder
+     * wiederholt unerreichte Stellen. Im geschützten Modus läuft die Ader danach durch die Rückwegprüfung des Erz-Gangs.
+     */
+    List<BlockPos> knownVein(ServerLevel sl, Resources.Res res, boolean allowDive) {
         for (int guard = 0; guard < 8; guard++) {
             CompanionMemory.Place p = mob.memory.nearest(CompanionMemory.Kind.ORE, res.key(), sl, mob.blockPosition(), 160);
-            if (p == null) return false;
-            if (p.pos.distSqr(mob.blockPosition()) > 40 * 40) return goRemembered(sl, CompanionMemory.Kind.ORE, res.key(), 160, again);
+            if (p == null || p.pos.distSqr(mob.blockPosition()) > 40 * 40) return List.of();
             List<BlockPos> vein = new ArrayList<>();
             for (BlockPos q : BlockPos.betweenClosed(p.pos.offset(-2, -2, -2), p.pos.offset(2, 2, 2)))
-                if (res.block().test(sl.getBlockState(q)) && !mob.hazardAround(sl, q, sl.getBlockState(q.above()).is(Blocks.WATER))
-                        && (allowDive || !CompanionEntity.deepWater(sl, q)))
+                if (SafeLevel.test(sl, q, res.block()) && !mob.hazardAround(sl, q, sl.getBlockState(q.above()).is(Blocks.WATER))
+                        && (allowDive || !CompanionGathering.deepWater(sl, q)))
                     vein.add(q.immutable());
             boolean again2 = p.pos.equals(memoryTrip);
             if (vein.isEmpty() || (again2 && (oreVisits >= 3 || vein.stream().allMatch(q -> q.distSqr(mob.blockPosition()) > 36)))) {
@@ -147,14 +167,12 @@ public final class MiningKnowledge {
             oreVisits = again2 ? oreVisits + 1 : 0;
             memoryTrip = p.pos;
             vein.sort(Comparator.comparingDouble(q -> q.distSqr(mob.blockPosition())));
-            List<Task> next = new ArrayList<>();
-            for (int i = 0; i < Math.min(vein.size(), want); i++) next.add(Task.breakAt(vein.get(i), sl.getBlockState(vein.get(i)).getBlock()));
-            if (again.spec() instanceof TaskSpec.ResourceGoal) next.add(again);
+            vein.removeIf(this::blacklisted);
+            if (vein.isEmpty()) return List.of();
             mob.logInfo(EventKind.LOOT, CompanionTexts.tr("log.memory.ore", CompanionTexts.resource(res.key()), CompanionTexts.location(p, mob.blockPosition())));
-            mob.replaceCurrent(next);
-            return true;
+            return vein;
         }
-        return false;
+        return List.of();
     }
 
     /** Erze ohne Sperre (unerreichbar markierte bleiben eine Weile außen vor). */

@@ -12,6 +12,8 @@ import com.mojang.logging.LogUtils;
 
 import dev.begleiter.CompanionCraft;
 import dev.begleiter.CompanionEntity;
+import dev.begleiter.CompanionLog;
+import dev.begleiter.CompanionGathering;
 import dev.begleiter.CompanionTexts;
 import net.minecraft.network.chat.Component;
 import dev.begleiter.task.TaskSpec;
@@ -163,7 +165,7 @@ public final class BotDebugServer {
                 : c.currentTask() == null ? CompanionTexts.mode(c) : explain(c, c.currentTask());
         return new BotDebug.Entry(c.getUUID(), c.getId(), clip(c.getName().getString(), 200),
                 c.level().dimension().identifier().toString(), c.getX(), c.getY(), c.getZ(), c.getHealth(),
-                c.getMaxHealth(), c.hunger, state(c), status);
+                c.getMaxHealth(), c.food.level(), state(c), status);
     }
 
     private static BotDebug.Detail detail(CompanionEntity c, boolean full, boolean wantPath) {
@@ -252,7 +254,7 @@ public final class BotDebugServer {
                 tasks, c.taskCount(), path, obstacles, inventory, equipment, log);
     }
 
-    private static BotDebug.LogLine logLine(CompanionEntity c, CompanionEntity.LogEntry e, boolean recent) {
+    private static BotDebug.LogLine logLine(CompanionEntity c, CompanionLog.Entry e, boolean recent) {
         return new BotDebug.LogLine(e.level(), Math.max(0, (c.tickCount - e.tick()) / 20), Math.max(0, e.tick() / 20),
                 Math.max(1, e.count()), e.kind(), e.textComponent(), recent);
     }
@@ -270,7 +272,7 @@ public final class BotDebugServer {
         Component block = t.block() == null ? CompanionTexts.tr("debug.action.block") : t.block().getName();
         return switch (t.spec()) {
             case TaskSpec.Mine m -> CompanionTexts.tr("debug.action.mine", CompanionTexts.resource(m.resource()),
-                    CompanionEntity.oreLevel(m.resource()), at.getY(), t.tries());
+                    CompanionGathering.oreLevel(m.resource()), at.getY(), t.tries());
             case TaskSpec.Gather g -> CompanionTexts.tr("debug.action.gather", CompanionTexts.resource(g.resource()), g.count());
             case TaskSpec.Break b -> CompanionTexts.tr(b.block() != null && isOre(BuiltInRegistries.BLOCK.getKey(b.block()).getPath())
                     ? "debug.action.ore" : "debug.action.break", block, where);
@@ -357,7 +359,7 @@ public final class BotDebugServer {
                 c.setHealth(Math.clamp(cmd.x(), 1, (int) c.getMaxHealth()));
                 what = CompanionTexts.tr("debug.command.health", (int) c.getHealth());
             }
-            case BotDebug.A_HUNGER -> { c.hunger = Math.clamp(cmd.x(), 0, 20); what = CompanionTexts.tr("debug.command.hunger", c.hunger); }
+            case BotDebug.A_HUNGER -> { c.food.set(Math.clamp(cmd.x(), 0, 20)); what = CompanionTexts.tr("debug.command.hunger", c.food.level()); }
             default -> { return CompanionTexts.tr("debug.command.unknown"); }
         }
         c.logInfo(CompanionTexts.tr("log.debug", p.getName(), what));

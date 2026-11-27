@@ -230,6 +230,11 @@ public final class Navigator {
         if (goal instanceof Goal.Block b) {
             var state = context.blocks.get(b.x(), b.y(), b.z());
             context.allowPortal = state != null && state.is(net.minecraft.world.level.block.Blocks.NETHER_PORTAL);
+            var task = mob.currentTask();
+            if (state != null && state.is(net.minecraft.world.level.block.Blocks.END_PORTAL) && task != null
+                    && task.spec() instanceof dev.begleiter.task.TaskSpec.MoveTo move
+                    && "minecraft:end_portal".equals(move.portal()))
+                context.endPortalTarget = new BlockPos(b.x(), b.y(), b.z());
         }
         return context;
     }

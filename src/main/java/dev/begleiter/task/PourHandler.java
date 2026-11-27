@@ -36,7 +36,7 @@ final class PourHandler implements TaskHandler {
         }
         if (!ctx.approach(lava, REACH_SQR)) return Status.RUNNING;
         mob.getLookControl().setLookAt(Vec3.atCenterOf(lava));
-        List<BlockPos> made = mob.pourWater(sl, lava);
+        List<BlockPos> made = mob.portals.pourWater(sl, lava);
         mob.memory.forgetNear(CompanionMemory.Kind.LAVA, null, sl, lava, 1);
         // Das neue Obsidian gleich abbauen (nächstes zuerst) und einsammeln
         made.sort(Comparator.comparingDouble(p -> p.distSqr(mob.blockPosition())));

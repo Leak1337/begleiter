@@ -52,11 +52,14 @@ public final class CompanionPrerequisites {
 
     public static boolean readyTool(CompanionEntity e, String key, int units) {
         int tier = requiredTier(key);
-        if (tier == 0) return true;
+        return tier == 0 || availablePickUses(e, tier) >= Math.max(1, units);
+    }
+
+    static int availablePickUses(CompanionEntity e, int tier) {
         int available = 0;
         int[] uses = pickUses(e);
         for (int i = tier; i < uses.length; i++) available += uses[i];
-        return available >= Math.max(1, units);
+        return available;
     }
 
     public static Item gatheredItem(String key) {
@@ -116,6 +119,8 @@ public final class CompanionPrerequisites {
         }
 
         Inventory copy() { return new Inventory(slots, exact); }
+
+        long freeSlots() { return slots.stream().filter(ItemStack::isEmpty).count(); }
 
         ItemStack stack(int slot) { return slots.get(slot).copy(); }
 

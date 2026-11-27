@@ -38,12 +38,13 @@ final class DeliverHandler implements TaskHandler {
             var boxes = mob.storageBoxes(sl, zone.center());
             if (boxes.isEmpty()) return Status.FAILED;
             if (!ctx.approach(boxes.getFirst(), 12.25)) return Status.RUNNING;
-            int before = mob.usedSlots();
+            int before = mob.totalItems();
             for (BlockPos pos : boxes) {
                 var box = mob.containerAt(sl, pos);
                 if (box != null) { mob.depositInto(box, true); mob.memory.noteChest(sl, pos, box); }
             }
-            if (mob.usedSlots() >= before) mob.storageFullUntil = mob.tickCount + 1200;
+            if (mob.totalItems() >= before) mob.storageFullUntil = mob.tickCount + 1200;
+            else mob.work.progress(1);
             return Status.DONE;
         }
         BlockPos home = mob.getHome();
@@ -54,7 +55,7 @@ final class DeliverHandler implements TaskHandler {
                 return Status.FAILED;
             }
             if (!ctx.approachEntity(owner, 9)) return Status.RUNNING;
-            mob.dropToOwner(owner);
+            mob.giveTo(owner, null);
             return Status.DONE;
         }
         if (!ctx.approach(home, 3.5 * 3.5)) return Status.RUNNING;
@@ -66,12 +67,12 @@ final class DeliverHandler implements TaskHandler {
             return Status.FAILED;
         }
         boolean keepQuota = deliver.keepStock();
-        mob.swingArm();
+        mob.useContainer(sl, home);
         int usedBefore = mob.usedSlots();
         int left = mob.depositInto(c, keepQuota);
         mob.memory.noteChest(sl, home, c); // Inhalt nach dem Einlagern merken
         // Lagerkiste voll: in die anderen Lager-Kisten daneben
-        for (BlockPos other : mob.storageChests(sl)) {
+        for (BlockPos other : mob.storage.storageChests(sl)) {
             if (left == 0) break;
             if (other.equals(home)) continue;
             Container oc = mob.containerAt(sl, other);
@@ -91,13 +92,13 @@ final class DeliverHandler implements TaskHandler {
                 mob.replaceCurrent(pre);
                 return Status.REPLACED;
             }
-            BlockPos added = mob.placeStorageChest(sl);
+            BlockPos added = mob.storage.placeStorageChest(sl);
             Container nc = added == null ? null : mob.containerAt(sl, added);
             if (nc != null) {
                 mob.depositInto(nc, keepQuota);
                 mob.memory.noteChest(sl, added, nc);
             } else if (mob.getHouseOrigin() != null && mob.findItem(Items.CHEST) >= 0 && task.tries() < 3
-                    && mob.houseAnnexes() < CompanionEntity.MAX_ANNEXES) {
+                    && mob.houseAnnexes() < dev.begleiter.CompanionHouse.MAX_ANNEXES) {
                 // Kein Platz mehr im Haus: anbauen, dann die Kiste dort aufstellen
                 mob.tell(CompanionTexts.tr("handler.deliver.annex"));
                 mob.replaceCurrent(List.of(Task.extend(0), task.retry()));

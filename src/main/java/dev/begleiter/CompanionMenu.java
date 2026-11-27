@@ -31,6 +31,11 @@ public class CompanionMenu extends AbstractContainerMenu {
         public static final Page STATUS = register(7, "status", "Status");
         public static final Page DEBUG = register(8, "debug", "Debug");
         public static final Page DUTIES = register(9, "duties", "Tasks");
+        public static final Page WAYPOINTS = register(10, "waypoints", "Waypoints");
+        public static final Page ORDERS = register(11, "orders", "Orders");
+        public static final Page WORK = register(12, "work", "Work");
+        public static final Page ADVENTURE = register(13, "adventure", "Adventure");
+        public static final Page TALK = register(14, "talk", "Talk");
         public final int id;
         public final String key, title;
         private Page(int id, String key, String title) { this.id = id; this.key = key; this.title = title; }
@@ -54,6 +59,7 @@ public class CompanionMenu extends AbstractContainerMenu {
     /** Bauen-Seite: Bau-Bewegung weiterschalten (Normal → Fliegen → Fliegen/Teleport). */
     public static final int BUILD_MOVEMENT_TOGGLE = 97;
     public static final int BUILD_PREVIEW_PLACE = 96;
+    public static final int WAYPOINT_MAP_OPEN = 95;
     public static final int BUILD_PANEL_BUTTON = 2000, BUILD_THUMBNAIL_BUTTON = 2100;
     private CompanionMachines.Blueprint previewBlueprint;
     private CompanionSchematics.Schematic previewPlan;
@@ -194,6 +200,7 @@ public class CompanionMenu extends AbstractContainerMenu {
         if (comp == null || !stillValid(player) || !(player instanceof ServerPlayer sp)
                 || sp.containerMenu != this) return false;
         Page next = Page.byId(button - PAGE_BUTTON);
+        if (button == WAYPOINT_MAP_OPEN) return page == Page.WAYPOINTS && CompanionWaypointMap.open(sp, comp);
         if (button >= BUILD_THUMBNAIL_BUTTON && button < BUILD_THUMBNAIL_BUTTON + SCHEM_COUNT) {
             if (page != Page.BUILD) return false;
             // Nach einem Lag können Pakete gebündelt ankommen: jeden angeforderten Slot behalten statt verwerfen.
@@ -241,6 +248,30 @@ public class CompanionMenu extends AbstractContainerMenu {
         syncSnapshot();
         broadcastChanges();
         return true;
+    }
+
+    /** Menüknopf mit Chat-Befehl (siehe {@link CompanionMenuCommands}); Rückmeldung wie bei jedem Menüknopf. */
+    void runCommand(ServerPlayer sp, boolean free, String command) {
+        if (comp == null || !stillValid(sp) || sp.containerMenu != this) return;
+        if (comp.tickCount == lastPressTick && lastPressSlot == -2) return; // Doppelklick im selben Tick
+        lastPressTick = comp.tickCount;
+        lastPressSlot = -2;
+        comp.consoleDebug("Menu command: page " + page + (free ? " (free)" : "") + ": " + command);
+        comp.chatSerial++;
+        try {
+            Component reply = CompanionMenuCommands.execute(sp, comp, free, command);
+            if (reply != null) report(reply);
+            else if (free && command != null && !command.isBlank() && command.length() <= CompanionMenuCommands.MAX_LENGTH
+                    && CompanionLlmChat.start(sp, comp, command.strip(), sp.clientInformation().language()))
+                comp.setUiFeedback(CompanionTexts.tr("menu.command.thinking"));
+            else report(CompanionTexts.tr(free ? "menu.command.unknown" : "menu.command.none"));
+        } catch (RuntimeException ex) {
+            comp.setUiFeedback(CompanionTexts.tr("reply.error"));
+            comp.logError(CompanionTexts.tr("log.menu.error", -2, CompanionTexts.literal(String.valueOf(ex))));
+        }
+        remainingStale = true;
+        syncSnapshot();
+        broadcastChanges();
     }
 
     /**
@@ -381,16 +412,16 @@ public class CompanionMenu extends AbstractContainerMenu {
                 ? CompanionTexts.tr("status.no_home") : CompanionTexts.literal(comp.mine().toShortString())));
         set(28, "clock", CompanionTexts.tr("panel.status.activity", CompanionTexts.activity(comp)));
         set(29, "paper", CompanionTexts.tr("panel.status.tasks", comp.taskCount()));
-        set(30, "bread", CompanionTexts.tr("panel.status.food", comp.foodCount(), comp.hunger));
+        set(30, "bread", CompanionTexts.tr("panel.status.food", comp.foodCount(), comp.food.level()));
         set(31, "chest", CompanionTexts.tr("panel.status.inventory", comp.usedSlots()));
         set(33, "writable_book", CompanionTexts.tr("panel.status.project", CompanionTexts.tr(comp.projekt.vorhanden()
                 ? "project.state.draft" : "project.state.none")));
     }
 
     private void logPage() {
-        List<CompanionEntity.LogEntry> lines = comp.getLog(logOffset, 44, errorsOnly);
+        List<CompanionLog.Entry> lines = comp.getLog(logOffset, 44, errorsOnly);
         for (int i = 0; i < lines.size(); i++) {
-            CompanionEntity.LogEntry e = lines.get(i);
+            CompanionLog.Entry e = lines.get(i);
             set(i, e.level() == 'E' ? "red_dye" : e.level() == 'W' ? "orange_dye" : "paper", CompanionEntity.formatLogText(e));
         }
         set(LOG_FILTER, errorsOnly ? "redstone_torch" : "torch",

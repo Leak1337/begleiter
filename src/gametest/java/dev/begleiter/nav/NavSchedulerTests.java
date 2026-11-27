@@ -105,8 +105,14 @@ public class NavSchedulerTests {
             // in der Warteschlange, bevor überhaupt eine Suche entsteht – auch das ist eine wartende Suche.
             c.nav.stop();
             int idle = scheduler.snapshot().tracked();
+            // Ohne KI hält niemand den Bodenkontakt aktuell; in der Luft startet der Navigator absichtlich keine Suche.
+            c.setOnGround(true);
+            c.nav.lastNodes = -1;
             c.nav.goTo(goal);
-            h.assertTrue(c.nav.searching() || scheduler.snapshot().tracked() == idle + 1, "Noch keine wartende Suche");
+            // Auf einem leeren Server kann die kleine Arena schon im ersten Takt fertig durchsucht sein: auch dann gab es
+            // eine Suche, sie ist nur nicht mehr offen.
+            h.assertTrue(c.nav.searching() || scheduler.snapshot().tracked() == idle + 1 || c.nav.lastNodes >= 0,
+                    "Noch keine wartende Suche");
             c.nav.stop();
             h.assertTrue(!c.nav.searching(), "Navigator sucht nach Stopp weiter");
             h.assertValueEqual(scheduler.snapshot().tracked(), idle, "Stopp hält Budgetreservierung fest");

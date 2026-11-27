@@ -16,13 +16,19 @@ final class SortHandler implements TaskHandler {
     @Override
     public Status tick(TaskContext ctx) {
         if (!ctx.approach(task.pos(), 12.25)) return Status.RUNNING;
+        ctx.mob().useContainer(ctx.level(), task.pos());
         var r = CompanionJobs.sortByCategory(ctx.mob(), ctx.level(), task.pos());
         if (r.boxes() == 0) {
-            ctx.mob().tell(CompanionTexts.tr("jobs.sort.none"));
+            ctx.say(CompanionTexts.tr("jobs.sort.none"));
+            return Status.FAILED;
+        }
+        if (r.failed()) {
+            ctx.say(r.failure());
             return Status.FAILED;
         }
         if (ctx.mob().duty() != null) ctx.mob().dutyStorageFingerprint = dev.begleiter.CompanionDuties.storageFingerprint(ctx.mob(), ctx.level(), task.pos());
-        ctx.mob().tell(CompanionTexts.tr("jobs.sort.done", r.boxes(), CompanionTexts.join(r.lineTexts(), "; ")));
+        ctx.mob().work.progress(1);
+        ctx.say(CompanionTexts.tr("jobs.sort.done", r.boxes(), CompanionTexts.join(r.lineTexts(), "; ")));
         return Status.DONE;
     }
 }

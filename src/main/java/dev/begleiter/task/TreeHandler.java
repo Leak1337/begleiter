@@ -41,11 +41,14 @@ final class TreeHandler implements TaskHandler {
             return Status.RUNNING;
         }
         if (treeCache == null || mob.tickCount - treeCacheTick >= 10) {
-            treeCache = mob.treeLogs(sl, task.pos());
+            treeCache = mob.gathering.treeLogs(sl, task.pos());
             treeCacheTick = mob.tickCount;
         }
         List<BlockPos> logs = new ArrayList<>();
-        for (BlockPos p : treeCache) if (sl.getBlockState(p).is(BlockTags.LOGS) && !mob.hazardAround(sl, p, true)) logs.add(p);
+        for (BlockPos p : treeCache) {
+            BlockState state = sl.getBlockState(p);
+            if (state.is(BlockTags.LOGS) && mob.storage.harvestAllowed(sl, p, state) && !mob.hazardAround(sl, p, true)) logs.add(p);
+        }
         if (logs.isEmpty()) {
             if (!mob.hasScaffold()) return Status.DONE;
             mob.replaceCurrent(List.of(Task.descend()));
@@ -93,9 +96,9 @@ final class TreeHandler implements TaskHandler {
             mob.problem(CompanionTexts.tr("handler.tree.cannot_climb"));
             return Status.FAILED;
         }
-        if (r == 2 && mob.pillarObstacle != null) {
-            BlockState st = sl.getBlockState(mob.pillarObstacle);
-            mob.pushFront(Task.breakAt(mob.pillarObstacle, st.getBlock()));
+        if (r == 2 && mob.scaffolding.obstacle() != null) {
+            BlockState st = sl.getBlockState(mob.scaffolding.obstacle());
+            mob.pushFront(Task.breakAt(mob.scaffolding.obstacle(), st.getBlock()));
             return Status.REPLACED;
         }
         return Status.RUNNING;

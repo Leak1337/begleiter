@@ -47,8 +47,9 @@ final class TradeHandler implements TaskHandler {
             ctx.say(CompanionTexts.tr("jobs.trade.unknown", CompanionTexts.literal(trade.item())));
             return Status.FAILED;
         }
-        var vs = CompanionJobs.villagers(sl, mob, 32);
+        var vs = CompanionJobs.villagers(sl, mob, 32).stream().filter(v -> mob.work.permitsTrade(sl, v.blockPosition())).toList();
         if (vs.isEmpty()) {
+            if (mob.work.active()) return Status.FAILED;
             CompanionMemory.Place village = mob.memory.nearest(CompanionMemory.Kind.VILLAGE, null, sl, mob.blockPosition(), 2000);
             if (village != null && task.tries() < 2) {
                 ctx.say(CompanionTexts.tr("jobs.trade.village", CompanionTexts.location(village, mob.blockPosition())));
@@ -76,6 +77,8 @@ final class TradeHandler implements TaskHandler {
         if (++progress < 10) return Status.RUNNING;
         progress = 0;
         ItemStack got = CompanionJobs.trade(mob, partner, offer);
+        if (got.isEmpty() && mob.work.active()) return Status.FAILED;
+        if (!got.isEmpty()) mob.work.progress(1);
         mob.logInfo(CompanionTexts.tr("jobs.trade.received", got.getCount(), got.getHoverName()));
         traded += want != null ? got.getCount() : 1;
         boolean enough = want != null ? traded >= (trade.count() > 0 ? trade.count() : 16) : traded >= 16;

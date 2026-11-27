@@ -63,7 +63,9 @@ public final class CompanionCombat {
             case PASSIVE -> false;
             case DEFENSIVE -> threatens(e, t);
             // neutrale Mobs (Endermen, Zombie-Piglins …) nicht reizen – außer sie greifen schon an
-            case AGGRESSIVE -> !(t instanceof NeutralMob) || threatens(e, t);
+            // Piglins wie neutrale Mobs: ein Schlag macht die ganze Gruppe wütend (beobachtet: an der Lohenfestung
+            // von Piglins von 40 auf 4 Leben geprügelt und auf der Flucht abgestürzt)
+            case AGGRESSIVE -> !(t instanceof NeutralMob) && !type(t).equals("minecraft:piglin") || threatens(e, t);
         };
     }
 

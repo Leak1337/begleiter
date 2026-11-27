@@ -11,6 +11,7 @@ bin/
 
 # Minecraft run dir
 run/
+run-selfplay/
 
 # OS
 Thumbs.db

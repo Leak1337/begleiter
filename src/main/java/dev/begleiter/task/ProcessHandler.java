@@ -19,10 +19,16 @@ final class ProcessHandler implements TaskHandler {
             ctx.mob().problem(CompanionTexts.tr("processing.invalid_recipe", CompanionTexts.item(process.item())));
             return Status.FAILED;
         }
+        if (station != null && (!ctx.level().hasChunkAt(station)
+                || !ctx.level().getBlockState(station).is(net.minecraft.world.level.block.Block.byItem(ItemIds.resolve(recipe.station()))))) {
+            station = null;
+            progress = 0;
+        }
         if (station == null) station = ctx.mob().findStation(recipe.station(), 24);
-        if (station == null || !ctx.level().hasChunkAt(station)
-                || !ctx.level().getBlockState(station).is(net.minecraft.world.level.block.Block.byItem(ItemIds.resolve(recipe.station())))) {
-            ctx.mob().problem(CompanionTexts.tr("processing.missing_station", CompanionTexts.item(recipe.station())));
+        if (station == null) {
+            var reason = CompanionTexts.tr("processing.missing_station", CompanionTexts.item(recipe.station()));
+            if (ctx.mob().recoverRecipeProduction(reason)) return Status.REPLACED;
+            ctx.mob().problem(reason);
             return Status.FAILED;
         }
         if (!ctx.approach(station, 9.0)) return Status.RUNNING;

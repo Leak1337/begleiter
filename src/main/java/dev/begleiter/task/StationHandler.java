@@ -42,7 +42,8 @@ final class StationHandler implements TaskHandler {
         boolean portable = station.portable();
         if (!checked) {
             checked = true;
-            BlockPos existing = mob.findStation(id, portable ? 8 : 24);
+            int radius = portable ? 8 : 24;
+            BlockPos existing = mob.hasRecipeRequest() ? mob.findOrderStation(id, radius) : mob.findStation(id, radius);
             if (existing != null) {
                 if (id.equals("minecraft:chest") && mob.getHome() == null) mob.setHome(existing);
                 return Status.DONE;
@@ -62,6 +63,12 @@ final class StationHandler implements TaskHandler {
                 return Status.REPLACED;
             }
             if (!CompanionCraft.craft(mob, id, 1)) {
+                // Werkbank ohne genug Bretter (beobachtet: 3/4 Bretter, endlose Wiederholung): erst Holz fällen
+                // Rezeptaufträge des Spielers pausieren wie bisher, statt eigenmächtig loszuziehen
+                if (id.endsWith("crafting_table") && task.tries() < 2 && !mob.hasRecipeRequest()) {
+                    mob.replaceCurrent(List.of(Task.gather(dev.begleiter.Resources.WOOD.key(), 2), task.retry()));
+                    return Status.REPLACED;
+                }
                 mob.problem(CompanionTexts.tr("handler.station.craft_failed", CompanionTexts.item(id), mob.craftProblemComponent()));
                 // wie CRAFT: nicht sofort denselben Plan wieder starten (sonst Schleife ohne Bretter)
                 mob.reportAutonomousFailure(DecisionOutcome.Reason.MISSING_INPUT, task);
@@ -69,7 +76,7 @@ final class StationHandler implements TaskHandler {
                 return Status.FAILED;
             }
         }
-        BlockPos spot = mob.stationSpot(portable);
+        BlockPos spot = mob.stations.stationSpot(portable);
         if (spot == null) {
             if (ctx.guardedSupply()) {
                 ctx.abortAutonomousPlan(DecisionOutcome.Reason.MISSING_STATION);
@@ -91,7 +98,7 @@ final class StationHandler implements TaskHandler {
         }
         Block block = Block.byItem(item);
         BlockState st = block.defaultBlockState();
-        if (!sl.getBlockState(spot).isAir()) sl.destroyBlock(spot, true, mob); // Platz in der Wand freimachen
+        if (!sl.getBlockState(spot).isAir()) mob.worldBreak(sl, spot, true); // Platz in der Wand freimachen
         if (!mob.placeConfirmed(sl, spot, st)) {
             mob.logWarn(CompanionTexts.tr("handler.station.unconfirmed", CompanionTexts.item(id), spot.toShortString()));
             return Status.FAILED;
@@ -100,7 +107,7 @@ final class StationHandler implements TaskHandler {
         mob.getInventory().getItem(slot).shrink(1);
         mob.swingArm();
         mob.rememberStation(id, spot);
-        if (portable) mob.portableStations.add(spot.immutable());
+        if (portable) mob.stations.portable.add(spot.immutable());
         if (id.equals("minecraft:chest") && mob.getHome() == null) mob.setHome(spot);
         mob.logInfo(EventKind.CRAFT, CompanionTexts.tr("handler.station.placed", CompanionTexts.item(id), spot.toShortString()));
         return Status.DONE;

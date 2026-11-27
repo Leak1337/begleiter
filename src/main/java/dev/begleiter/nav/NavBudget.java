@@ -18,7 +18,7 @@ final class NavBudget {
     }
 
     private final Map<Object, Request> requests = new IdentityHashMap<>();
-    private final long limit;
+    private long limit;
     private final LongSupplier clock;
     private long tick, used, reserved, maxWait;
     private int grants, deferred;
@@ -28,6 +28,11 @@ final class NavBudget {
         if (limit <= 0) throw new IllegalArgumentException("Navigationsbudget muss positiv sein");
         this.limit = limit;
         this.clock = Objects.requireNonNull(clock);
+    }
+
+    /** Grenze ändern (Konfiguration); gilt ab sofort. */
+    void setLimit(long limit) {
+        if (limit > 0) this.limit = limit;
     }
 
     void beginTick() {

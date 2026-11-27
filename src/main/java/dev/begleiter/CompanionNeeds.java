@@ -72,6 +72,9 @@ public final class CompanionNeeds {
         if (hp < 0.4f && (e.getTarget() == null || e.inDanger()))
             return s(Need.SURVIVAL, 75 + (int) ((0.4f - hp) * 60), "health", (int) e.getHealth());
         if (!(e.level() instanceof ServerLevel sl)) return null;
+        // Nachts ohne heiles Haus in der Nähe: Nachtlager statt weiterzulaufen (wie beim Spielziel)
+        if (!(CompanionBrain.wantsPearlHunt(e) && sl.isDarkOutside()) && CompanionBrain.needsNightCamp(e, sl))
+            return s(Need.SURVIVAL, 86, "night");
         BlockPos inside = e.houseInside();
         if (inside != null && !(CompanionBrain.wantsPearlHunt(e) && sl.isDarkOutside())) {
             boolean night = sl.isDarkOutside();
@@ -84,7 +87,7 @@ public final class CompanionNeeds {
 
     private static Score hunger(CompanionEntity e) {
         int food = e.foodCount();
-        if (e.hunger <= 12 && food < 4) return s(Need.HUNGER, 95 - e.hunger * 2, "hunger", e.hunger, food);
+        if (e.food.level() <= 12 && food < 4) return s(Need.HUNGER, 95 - e.food.level() * 2, "hunger", e.food.level(), food);
         if (CompanionCraft.rawFood(e) >= 3 && CompanionCraft.canSmelt(e)) return s(Need.HUNGER, 42, "raw_food");
         if (food < 4 && CompanionCraft.tier(e, "pickaxe") >= 2 && e.hasFoodAnimalNearby())
             return s(Need.HUNGER, 64, "low_food", food);
@@ -98,7 +101,7 @@ public final class CompanionNeeds {
 
     private static Score order(CompanionEntity e) {
         if (e.hasScaffold()) return s(Need.ORDER, 76, "scaffold");
-        if (e.looseItemsNearby()) return s(Need.ORDER, 70, "loose_items");
+        if (e.pickup.looseItemsNearby()) return s(Need.ORDER, 70, "loose_items");
         if (wantsDeliver(e)) {
             int used = e.usedSlotsWithoutClutter();
             return s(Need.ORDER, 58 + (used - 28) * 4, "inventory", used);
@@ -117,14 +120,32 @@ public final class CompanionNeeds {
         if (pick < 3) return s(Need.GEAR, 56, "iron_tools");
         if (armorIngotsNeeded(e) > 0) return s(Need.GEAR, 52, "armor");
         if (diamondsNeeded(e) > 0) return s(Need.GEAR, 46, "diamond_tools");
+        if (rangedCraftable(e)) return s(Need.GEAR, 40, "ranged");
+        // Stirbt er im Nether wiederholt, vor dem nächsten Ausflug die volle Diamantausrüstung (sonst vor dem End)
+        if (CompanionBrain.needsBlaze(e) && CompanionBrain.deathsIn(e, net.minecraft.world.level.Level.NETHER) >= 1
+                && !fullDiamondGear(e) && !e.craftBlocked(DIAMOND_GEAR)) return s(Need.GEAR, 44, "nether_deaths");
         return null;
+    }
+
+    /** Bogen oder Pfeile lassen sich aus mitgeführtem Material herstellen. */
+    static boolean rangedCraftable(CompanionEntity e) {
+        if (!CompanionCraft.owns(e, "bow")) return CompanionCraft.count(e, "string") >= 3 && !e.craftBlocked("bow");
+        return CompanionCraft.count(e, "arrow") < CompanionBrain.ARROWS && CompanionCraft.count(e, "flint") >= 1
+                && CompanionCraft.count(e, "feather") >= 1 && !e.craftBlocked("arrow");
     }
 
     private static Score base(CompanionEntity e) {
         if (CompanionCraft.tier(e, "pickaxe") < 2) return null;
         if (!e.isHouseBuilt()) return s(Need.BASE, 62, "no_house");
+        if (e.level() instanceof ServerLevel damagedAt && e.houseDamaged(damagedAt)) return s(Need.BASE, 60, "no_house");
         if (e.getHome() == null) return s(Need.BASE, 59, "no_storage");
         if (!e.doorClosed && e.houseNeedsDoor() && !e.craftBlocked("#door")) return s(Need.BASE, 50, "no_door");
+        if (e.level() instanceof ServerLevel sl) {
+            // Ausbau: dunkle Stellen ums Haus ausleuchten (gegen Monster-Spawns), dann ein eigenes Feld anlegen
+            int dark = e.initiative.base.lightingWanted(sl);
+            if (dark > 0) return s(Need.BASE, 34, "dark_spots", dark);
+            if (e.initiative.base.wantsField(sl)) return s(Need.BASE, 32, "no_field");
+        }
         return null;
     }
 
@@ -138,6 +159,8 @@ public final class CompanionNeeds {
             return s(Need.PROGRESS, 42, "stronghold");
         if (e.endPortalPos != null && !CompanionBrain.dragonDefeated(e) && !readyForDragon(e))
             return s(Need.PROGRESS, 38, "dragon_gear");
+        // Nach dem Drachen: komplette Diamantausrüstung als nächstes großes Ziel
+        if (postDragonGear(e)) return s(Need.PROGRESS, 36, "post_dragon_gear", CompanionJobs.gearProgress(e, 4));
         return null;
     }
 
@@ -283,10 +306,19 @@ public final class CompanionNeeds {
         };
     }
 
+    static boolean actJourney(CompanionEntity e, Need need) {
+        return switch (need) {
+            case BASE -> actBase(e);
+            case GEAR -> actGear(e);
+            case PROGRESS -> actProgress(e);
+            default -> false;
+        };
+    }
+
     private static boolean actSurvival(CompanionEntity e) {
         if (e.isSheltered()) {
             stage(e, "wait_shelter");
-            e.noteWaiting();
+            e.watchdog.noteWaiting();
             e.plannerCooldownUntil = e.tickCount + 100;
             return true;
         }
@@ -307,23 +339,44 @@ public final class CompanionNeeds {
             }
             return true;
         }
+        if (e.level() instanceof ServerLevel sl && CompanionBrain.needsNightCamp(e, sl)) {
+            if (!CompanionBrain.nightCamp(e, sl)) return false;
+            stage(e, "wait_shelter");
+            e.watchdog.noteWaiting();
+            return true;
+        }
         return CompanionBrain.nightStep(e, CompanionCraft.tier(e, "pickaxe"));
     }
 
     private static boolean actHunger(CompanionEntity e) {
         int food = e.foodCount();
-        if (e.hunger <= 12 && food < 4) {
+        if (e.food.level() <= 12 && food < 4) {
             if (e.hasFoodAnimalNearby()) {
+                e.hungerSearches = 0;
                 stage(e, "hunger_hunt");
                 e.addTask(Task.hunt(6));
                 return true;
             }
+            if (e.level() instanceof net.minecraft.server.level.ServerLevel sl && CompanionFishing.hasOrCanMakeRod(e)
+                    && CompanionFishing.findSpot(e, sl, 16) != null) {
+                stage(e, "hunger_fish");
+                e.addTask(Task.fish(4));
+                return true;
+            }
             if (food == 0) {
+                // Wild ist knapp: an der Basis ein Feld anlegen (wie beim Spielziel), dann weiter suchen
+                if (e.level() instanceof ServerLevel fieldLevel && e.isHouseBuilt() && e.initiative.base.wantsField(fieldLevel)
+                        && e.initiative.base.startField(fieldLevel)) {
+                    stage(e, "build_field");
+                    return true;
+                }
                 stage(e, "hunger_search");
-                Task ex = e.explorePoint();
+                // erst nah suchen, nach zwei leeren Runden in fester Richtung weiterziehen statt im Kreis
+                Task ex = e.hungerSearches++ >= 2 ? e.relocatePoint() : null;
+                if (ex == null) ex = e.explorePoint();
                 if (ex != null) { e.addTask(ex); return true; }
             }
-        }
+        } else e.hungerSearches = 0;
         if (CompanionCraft.rawFood(e) >= 3 && CompanionCraft.canSmelt(e)) {
             stage(e, "cook");
             e.addTask(smelt());
@@ -343,7 +396,7 @@ public final class CompanionNeeds {
             e.addTask(Task.descend());
             return true;
         }
-        if (e.looseItemsNearby()) {
+        if (e.pickup.looseItemsNearby()) {
             stage(e, "collect");
             e.addTask(Task.collect(false));
             return true;
@@ -362,6 +415,11 @@ public final class CompanionNeeds {
             e.addTask(Task.house(null));
             return true;
         }
+        if (e.level() instanceof ServerLevel sl && e.houseDamaged(sl)) {
+            stage(e, "build_house"); // an derselben Stelle ausbessern
+            e.addTask(Task.house(e.house.origin()));
+            return true;
+        }
         if (e.getHome() == null) {
             stage(e, "build_storage");
             int planks = CompanionCraft.count(e, "#planks") + CompanionCraft.count(e, "#logs") * 4;
@@ -374,6 +432,16 @@ public final class CompanionNeeds {
             e.craftFailedUntil.put("#door", e.tickCount + 6000); // klappt es nicht, nicht sofort wieder
             e.addTask(Task.door(e.houseDoor().getFirst(), "north"));
             return true;
+        }
+        if (e.level() instanceof ServerLevel sl) {
+            if (e.initiative.base.lightingWanted(sl) > 0 && e.initiative.base.startLighting(sl)) {
+                stage(e, "light_base");
+                return true;
+            }
+            if (e.initiative.base.wantsField(sl) && e.initiative.base.startField(sl)) {
+                stage(e, "build_field");
+                return true;
+            }
         }
         return false;
     }
@@ -448,7 +516,7 @@ public final class CompanionNeeds {
             if (CompanionCraft.tier(e, "axe") < 3) e.addTask(craft("iron_axe"));
             if (CompanionCraft.tier(e, "sword") < 3) e.addTask(craft("iron_sword"));
             if (CompanionCraft.tier(e, "shovel") < 3) e.addTask(craft("iron_shovel"));
-            for (String piece : ARMOR) if (!CompanionCraft.owns(e, piece)) e.addTask(craft(piece));
+            for (String piece : ARMOR) if (!hasArmor(e, piece)) e.addTask(craft(piece));
             return true;
         }
         int needIngots = armorIngotsNeeded(e);
@@ -457,9 +525,12 @@ public final class CompanionNeeds {
             if (coal < 3) e.addTask(gather(Resources.COAL, 4));
             if (iron < needIngots) e.addTask(gather(Resources.IRON, needIngots - iron));
             e.addTask(smelt());
-            for (String piece : ARMOR) if (!CompanionCraft.owns(e, piece)) e.addTask(craft(piece));
+            for (String piece : ARMOR) if (!hasArmor(e, piece)) e.addTask(craft(piece));
             return true;
         }
+        if (rangedCraftable(e) && craftRangedFromInventory(e)) return true;
+        if (CompanionBrain.needsBlaze(e) && CompanionBrain.deathsIn(e, net.minecraft.world.level.Level.NETHER) >= 1
+                && !e.craftBlocked(DIAMOND_GEAR) && diamondsNeeded(e) == 0 && diamondGearStep(e)) return true;
         int needDia = diamondsNeeded(e);
         if (needDia > 0) {
             stage(e, "diamonds");
@@ -474,6 +545,12 @@ public final class CompanionNeeds {
     }
 
     private static final String[] ARMOR = {"shield", "iron_chestplate", "iron_leggings", "iron_helmet", "iron_boots"};
+
+    /** Eisenteil oder schon ein besseres (Diamant, Netherit) derselben Art. */
+    private static boolean hasArmor(CompanionEntity e, String piece) {
+        if (CompanionCraft.owns(e, piece)) return true;
+        return !piece.equals("shield") && CompanionJobs.pieceTier(e, piece.substring("iron_".length())) >= 3;
+    }
     private static final int[] ARMOR_COST = {1, 8, 7, 5, 4};
 
     /**
@@ -495,8 +572,43 @@ public final class CompanionNeeds {
 
     static int armorIngotsNeeded(CompanionEntity e) {
         int n = 0;
-        for (int i = 0; i < ARMOR.length; i++) if (!CompanionCraft.owns(e, ARMOR[i])) n += ARMOR_COST[i];
+        for (int i = 0; i < ARMOR.length; i++) if (!hasArmor(e, ARMOR[i])) n += ARMOR_COST[i];
         return n;
+    }
+
+    static void journeyIronGear(CompanionEntity e) {
+        if (CompanionCraft.tier(e, "pickaxe") < 3) {
+            journeyIronPiece(e, "iron_pickaxe", 3);
+            return;
+        }
+        for (int i = 0; i < ARMOR.length; i++) {
+            if (hasArmor(e, ARMOR[i])) continue;
+            journeyIronPiece(e, ARMOR[i], ARMOR_COST[i]);
+            return;
+        }
+    }
+
+    static void journeyIronSword(CompanionEntity e) { journeyIronPiece(e, "iron_sword", 2); }
+
+    private static void journeyIronPiece(CompanionEntity e, String item, int cost) {
+        int ingots = CompanionCraft.count(e, "iron_ingot");
+        if (ingots >= cost) {
+            e.addTask(craft(item));
+            return;
+        }
+        int raw = CompanionCraft.count(e, "raw_iron");
+        if (raw == 0) {
+            e.addTask(gather(Resources.IRON, cost - ingots));
+            return;
+        }
+        double fuel = e.fuelLeft + 8 * CompanionCraft.count(e, "#coals")
+                + 1.5 * (CompanionCraft.count(e, "#planks") + CompanionCraft.count(e, "#logs"));
+        int smelt = Math.min(raw, cost - ingots);
+        if (fuel < smelt) {
+            e.addTask(gather(Resources.WOOD, (int) Math.ceil((smelt - fuel) / 1.5) + 2));
+            return;
+        }
+        e.addTask(Task.smelt("iron_ingot", ingots + smelt));
     }
 
     static int diamondsNeeded(CompanionEntity e) {
@@ -552,12 +664,111 @@ public final class CompanionNeeds {
         } else {
             return false;
         }
+        // Stiele: ohne Stöcke, Bretter und Stämme erst Holz holen (beobachtet: 30 Minuten "Stock: Bretter 0/2")
+        if (CompanionCraft.count(e, "stick") < 2 && CompanionCraft.count(e, "#planks") < 2
+                && CompanionCraft.count(e, "#logs") == 0) e.addTask(gather(Resources.WOOD, 1));
         e.addTask(craft(id));
         return true;
     }
 
+    /**
+     * Bereit fürs End: Bogen und Pfeile für die Kristalle, volle Diamantausrüstung (außer die Diamantsuche ist gerade
+     * gesperrt, weil sie wiederholt scheiterte) und ein Wassereimer gegen Fallschaden.
+     */
     static boolean readyForDragon(CompanionEntity e) {
-        return CompanionCraft.owns(e, "bow") && CompanionCraft.count(e, "arrow") >= CompanionBrain.ARROWS;
+        return CompanionCraft.owns(e, "bow") && CompanionCraft.count(e, "arrow") >= CompanionBrain.ARROWS
+                && (fullDiamondGear(e) || e.craftBlocked(DIAMOND_GEAR)) && CompanionCraft.owns(e, "water_bucket");
+    }
+
+    /** Sperrschlüssel, wenn die Diamantsuche mehrfach gescheitert ist (dann zählt Eisen fürs End). */
+    static final String DIAMOND_GEAR = "#diamond_gear";
+
+    static boolean fullDiamondGear(CompanionEntity e) { return CompanionJobs.nextGearPiece(e, 4, 0) == null; }
+
+    private static int diamondCost(String piece) {
+        if (piece.endsWith("sword")) return 2;
+        if (piece.endsWith("pickaxe")) return 3;
+        if (piece.endsWith("chestplate")) return 8;
+        if (piece.endsWith("leggings")) return 7;
+        if (piece.endsWith("helmet")) return 5;
+        return 4; // Stiefel
+    }
+
+    /** Diamanten, die für die volle Diamantausrüstung noch fehlen (abzüglich mitgeführter). */
+    static int diamondGearMissing(CompanionEntity e) {
+        int need = 0;
+        for (String kind : CompanionJobs.GEAR)
+            if (!kind.equals("shield") && CompanionJobs.pieceTier(e, kind) < 4) need += diamondCost(kind);
+        return Math.max(0, need - CompanionCraft.count(e, "diamond"));
+    }
+
+    /**
+     * Nächstes Stück der Diamantausrüstung (Schwert, Spitzhacke, Brust, Hose, Helm, Stiefel; Schild bleibt Eisen):
+     * Diamanten für dieses Stück abbauen, dann herstellen. false = schon komplett.
+     */
+    static boolean diamondGearStep(CompanionEntity e) {
+        String next = CompanionJobs.nextGearPiece(e, 4, 0);
+        if (next == null) return false;
+        if (next.equals("shield")) {
+            var plan = CompanionPlanner.obtain(e, net.minecraft.world.item.Items.SHIELD, 1);
+            if (plan == null) return false;
+            stage(e, "shield");
+            for (Task t : plan.tasks()) e.addTask(t);
+            return true;
+        }
+        int cost = diamondCost(next), have = CompanionCraft.count(e, "diamond");
+        stage(e, "diamond_gear", CompanionJobs.gearProgress(e, 4));
+        if (have < cost) e.addTask(gather(Resources.DIAMOND, cost - have));
+        e.addTask(craft(next));
+        return true;
+    }
+
+    /**
+     * Bogen und Pfeile aus dem, was er dabei hat (Faden, Feuerstein, Federn); ohne Material nichts. Nützlich gegen
+     * Skelette, Creeper, Ghasts und für die Endkristalle.
+     */
+    static boolean craftRangedFromInventory(CompanionEntity e) {
+        if (!CompanionCraft.owns(e, "bow") && CompanionCraft.count(e, "string") >= 3 && !e.craftBlocked("bow")) {
+            stage(e, "bow");
+            e.addTask(craft("bow"));
+            return true;
+        }
+        int arrows = CompanionCraft.count(e, "arrow");
+        int flint = CompanionCraft.count(e, "flint"), feathers = CompanionCraft.count(e, "feather");
+        if (CompanionCraft.owns(e, "bow") && arrows < CompanionBrain.ARROWS && flint >= 1 && feathers >= 1
+                && CompanionCraft.count(e, "stick") + CompanionCraft.count(e, "#planks") + CompanionCraft.count(e, "#logs") > 0
+                && !e.craftBlocked("arrow")) {
+            stage(e, "arrows");
+            e.addTask(Task.craft("arrow", Math.min(CompanionBrain.ARROWS, arrows + Math.min(flint, feathers) * 4)));
+            return true;
+        }
+        return false;
+    }
+
+    /** Wassereimer gegen Fallschaden (Eimer herstellen, an der nächsten Quelle füllen). */
+    static boolean waterBucketStep(CompanionEntity e) {
+        if (CompanionCraft.owns(e, "water_bucket")) return false;
+        if (!CompanionCraft.owns(e, "bucket")) {
+            var plan = CompanionPlanner.obtain(e, net.minecraft.world.item.Items.BUCKET, 1);
+            if (plan == null) return false;
+            for (Task t : plan.tasks()) e.addTask(t);
+        }
+        stage(e, "water_bucket");
+        e.addTask(Task.water(null));
+        return true;
+    }
+
+    /** Tränke für den nächsten Abschnitt brauen, soweit Zutaten da sind (Feuerresistenz, Stärke vor dem Drachen ...). */
+    static boolean potionStep(CompanionEntity e, boolean dragonSoon, int netherDeaths, int endDeaths) {
+        for (var kind : CompanionPotions.Kind.values()) {
+            int want = e.potions.wanted(kind, dragonSoon, netherDeaths, endDeaths);
+            if (want > 0 && e.potions.count(kind) < want && !e.craftBlocked("#brew_" + kind.id())
+                    && e.potions.planBrew(kind, want)) {
+                stage(e, "brew", CompanionTexts.tr("potion." + kind.id()));
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean actProgress(CompanionEntity e) {
@@ -588,8 +799,8 @@ public final class CompanionNeeds {
         }
         // Lohenruten aus der Netherfestung
         if (CompanionBrain.needsBlaze(e)) {
-            BlockPos portal = e.nearestPortal(8);
-            if (portal == null) portal = CompanionEntity.portalInside(e.getPortalPos()).getFirst();
+            BlockPos portal = e.portals.nearest(8);
+            if (portal == null) portal = CompanionPortals.inside(e.getPortalPos()).getFirst();
             if (portal != null) {
                 stage(e, "nether_trip");
                 e.netherTrip = true;
@@ -606,18 +817,21 @@ public final class CompanionNeeds {
         }
         // Enderaugen herstellen, Festung finden, Endportal öffnen
         if (e.endPortalPos == null && CompanionBrain.pearlsAndEyes(e) >= CompanionBrain.PEARLS) {
-            int pearls = CompanionCraft.count(e, "ender_pearl");
-            if (pearls > 0) {
+            int eyes = Math.max(0, CompanionBrain.PEARLS - CompanionCraft.count(e, "ender_eye"));
+            if (eyes > 0) {
                 stage(e, "eyes");
-                if (!CompanionCraft.craft(e, "ender_eye", pearls)) e.problem(CompanionTexts.tr("log.problem.item", CompanionTexts.item("ender_eye"), e.craftProblemComponent()));
+                e.addTask(Task.craft("ender_eye", eyes));
             }
             stage(e, "stronghold");
             e.addTask(Task.stronghold());
             return true;
         }
-        // Bogen und Pfeile für das End
+        // Bogen und Pfeile für das End, dazu Diamantausrüstung, Wassereimer und Tränke
         if (e.endPortalPos != null && !CompanionBrain.dragonDefeated(e)) {
             boolean night = e.level().isDarkOutside();
+            if (!fullDiamondGear(e) && !e.craftBlocked(DIAMOND_GEAR) && diamondGearStep(e)) return true;
+            if (waterBucketStep(e)) return true;
+            if (potionStep(e, true, 0, 0)) return true;
             if (!CompanionCraft.owns(e, "bow")) {
                 if (CompanionCraft.count(e, "string") >= 3) {
                     stage(e, "bow");
@@ -647,7 +861,19 @@ public final class CompanionNeeds {
                 }
             }
         }
+        if (postDragonGear(e)) {
+            e.initiative.postDragonGearUntil = e.tickCount + 6000; // nicht in einer Schleife immer wieder wählen
+            stage(e, "post_dragon_gear", CompanionJobs.gearProgress(e, 4));
+            e.addTask(CompanionJobs.gearTask(4, 0, null, 0, 0));
+            return true;
+        }
         return false;
+    }
+
+    /** Drache besiegt, Diamantausrüstung noch nicht komplett und nicht gerade erst versucht. */
+    static boolean postDragonGear(CompanionEntity e) {
+        return e.tickCount >= e.initiative.postDragonGearUntil && CompanionBrain.dragonDefeated(e)
+                && CompanionJobs.nextGearPiece(e, 4, 0) != null;
     }
 
     private static boolean actSupply(CompanionEntity e) {

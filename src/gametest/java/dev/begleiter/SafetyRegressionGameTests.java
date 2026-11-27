@@ -75,11 +75,11 @@ public class SafetyRegressionGameTests {
         h.setBlock(tree.above(), Blocks.OAK_LEAVES);
         BlockPos low = h.absolutePos(wallLow), high = h.absolutePos(wallHigh), trunk = h.absolutePos(tree);
         h.runAfterDelay(10, () -> { // erst stehen lassen: die Erreichbarkeitsprüfung braucht einen gelandeten Mob
-            var wood = c.buildTrees(4);
+            var wood = c.gathering.buildTrees(4);
             h.assertTrue(wood.stream().noneMatch(t -> low.equals(t.pos()) || high.equals(t.pos())),
                     "Stämme der Hüttenwand als Holz eingeplant: " + wood);
             h.assertTrue(wood.stream().anyMatch(t -> trunk.equals(t.pos())), "Baum mit Laub nicht als Holz gefunden: " + wood);
-            var tunnel = c.tunnel(net.minecraft.core.Direction.EAST, 5);
+            var tunnel = c.gathering.tunnel(net.minecraft.core.Direction.EAST, 5);
             h.assertTrue(tunnel.stream().noneMatch(t -> low.equals(t.pos()) || high.equals(t.pos())),
                     "Stollen gräbt durch die Hüttenwand: " + tunnel);
             h.succeed();
@@ -122,15 +122,15 @@ public class SafetyRegressionGameTests {
             level.setBlock(corner.offset(x, y, z), Blocks.AIR.defaultBlockState(), 2);
         floor.accept(Blocks.GRASS_BLOCK);
         h.setBlock(2, 1, 2, Blocks.SHORT_GRASS); // Gras und Blumen stören nicht
-        h.assertTrue(CompanionEntity.buildSiteAt(level, corner.getX(), corner.getZ()) != null, "Grass rejected");
+        h.assertTrue(CompanionHouse.buildSiteAt(level, corner.getX(), corner.getZ()) != null, "Grass rejected");
         h.setBlock(3, 1, 3, Blocks.TORCH);
-        h.assertTrue(CompanionEntity.buildSiteAt(level, corner.getX(), corner.getZ()) == null, "Torch on the site accepted");
+        h.assertTrue(CompanionHouse.buildSiteAt(level, corner.getX(), corner.getZ()) == null, "Torch on the site accepted");
         h.setBlock(3, 1, 3, Blocks.REDSTONE_WIRE);
-        h.assertTrue(CompanionEntity.buildSiteAt(level, corner.getX(), corner.getZ()) == null, "Redstone on the site accepted");
+        h.assertTrue(CompanionHouse.buildSiteAt(level, corner.getX(), corner.getZ()) == null, "Redstone on the site accepted");
         h.setBlock(3, 1, 3, Blocks.AIR);
         h.setBlock(2, 1, 2, Blocks.AIR);
         floor.accept(Blocks.OAK_PLANKS);
-        h.assertTrue(CompanionEntity.buildSiteAt(level, corner.getX(), corner.getZ()) == null, "Plank floor (roof) accepted");
+        h.assertTrue(CompanionHouse.buildSiteAt(level, corner.getX(), corner.getZ()) == null, "Plank floor (roof) accepted");
         h.succeed();
     }
 
@@ -141,11 +141,11 @@ public class SafetyRegressionGameTests {
         BlockPos p = h.absolutePos(new BlockPos(3, 1, 3));
         for (var b : java.util.List.of(Blocks.OAK_PLANKS, Blocks.GLASS, Blocks.STONE_BRICKS, Blocks.BRICKS)) {
             h.setBlock(3, 1, 3, b);
-            h.assertFalse(CompanionEntity.mayDigForStation(level, p, level.getBlockState(p)), b + " would be dug out");
+            h.assertFalse(CompanionStations.mayDigForStation(level, p, level.getBlockState(p)), b + " would be dug out");
         }
         for (var b : java.util.List.of(Blocks.STONE, Blocks.DIRT, Blocks.DEEPSLATE, Blocks.NETHERRACK)) {
             h.setBlock(3, 1, 3, b);
-            h.assertTrue(CompanionEntity.mayDigForStation(level, p, level.getBlockState(p)), b + " not usable");
+            h.assertTrue(CompanionStations.mayDigForStation(level, p, level.getBlockState(p)), b + " not usable");
         }
         h.succeed();
     }
@@ -225,7 +225,7 @@ public class SafetyRegressionGameTests {
         BlockPos dirt = start.south(2), chest = start.south(3);
         h.getLevel().setBlockAndUpdate(dirt, Blocks.DIRT.defaultBlockState());
         h.getLevel().setBlockAndUpdate(chest, Blocks.STONE.defaultBlockState());
-        int queued = c.queueClear(player, 1, 1, 3);
+        int queued = c.orders.queueClear(player, 1, 1, 3);
         h.assertTrue(queued == 2, "Expected dirt and stone queued, got " + queued);
         h.getLevel().setBlockAndUpdate(chest, Blocks.CHEST.defaultBlockState());
         h.runAfterDelay(160, () -> {
@@ -401,7 +401,7 @@ public class SafetyRegressionGameTests {
         h.assertValueEqual(seen.size(), CompanionJobs.Category.values().length, "test covers every category");
         var before = contents(boxes);
         if (byCategory) CompanionJobs.sortByCategory(c, h.getLevel(), c.blockPosition());
-        else c.sortChests(h.getLevel(), c.blockPosition());
+        else c.storage.sortChests(h.getLevel(), c.blockPosition());
         var after = contents(boxes);
         h.assertValueEqual(after.size(), before.size(), "distinct item kinds after sorting");
         for (int i = 0; i < before.size(); i++) {

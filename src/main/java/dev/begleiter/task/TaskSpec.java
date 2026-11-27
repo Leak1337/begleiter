@@ -22,7 +22,9 @@ public sealed interface TaskSpec {
     // ------------------------------------------------------------------ Grundaufgaben
 
     /** Zur Position laufen; reachSqr = Reichweite² (0 = 9). */
-    record MoveTo(BlockPos pos, int reachSqr) implements TaskSpec {
+    record MoveTo(BlockPos pos, int reachSqr, boolean stockReturn, String portal) implements TaskSpec {
+        public MoveTo(BlockPos pos, int reachSqr) { this(pos, reachSqr, false); }
+        public MoveTo(BlockPos pos, int reachSqr, boolean stockReturn) { this(pos, reachSqr, stockReturn, null); }
         @Override public TaskType type() { return TaskType.MOVE_TO; }
     }
 
@@ -40,7 +42,9 @@ public sealed interface TaskSpec {
     }
 
     /** Block abbauen; block == null: jeden nicht-leeren Block. */
-    record Break(BlockPos pos, Block block) implements TaskSpec {
+    record Break(BlockPos pos, Block block, String stockItem) implements TaskSpec {
+        public Break(BlockPos pos, Block block) { this(pos, block, null); }
+        public boolean scoped() { return stockItem != null; }
         @Override public TaskType type() { return TaskType.BREAK; }
     }
 
@@ -69,15 +73,24 @@ public sealed interface TaskSpec {
 
     // ------------------------------------------------------------------ Herstellung
 
-    /** Recipe order: phase 0 plan, 1 check fresh production, 2 hand over, 3 complete, 4 refill a changed source. */
-    record Request(String item, int count, boolean materials, int phase, int baseline, BlockPos excludedSource) implements TaskSpec {
+    /** Recipe orders use phases 0–4. Home orders use 5 for planning and 6 for delivery. */
+    record Request(String item, int count, boolean materials, int phase, int baseline, BlockPos excludedSource,
+                   BlockPos pos, String fuel) implements TaskSpec {
         public Request(String item, int count, boolean materials, int phase, int baseline) {
             this(item, count, materials, phase, baseline, null);
+        }
+        public Request(String item, int count, boolean materials, int phase, int baseline, BlockPos excludedSource) {
+            this(item, count, materials, phase, baseline, excludedSource, null);
+        }
+        public Request(String item, int count, boolean materials, int phase, int baseline, BlockPos excludedSource, BlockPos pos) {
+            this(item, count, materials, phase, baseline, excludedSource, pos, null);
         }
         public Request {
             item = ItemIds.canonicalOrOriginal(item);
             excludedSource = excludedSource == null ? null : excludedSource.immutable();
+            pos = pos == null ? null : pos.immutable();
         }
+        public boolean homeOrder() { return phase == 5 || phase == 6; }
         @Override public TaskType type() { return TaskType.REQUEST; }
     }
 
@@ -106,6 +119,11 @@ public sealed interface TaskSpec {
     record Station(String item, boolean portable) implements TaskSpec {
         public Station { item = ItemIds.canonicalOrOriginal(item); }
         @Override public TaskType type() { return TaskType.STATION; }
+    }
+
+    /** Tränke brauen: potion = Art (fire, strength, healing, slow_fall), count = gewünschte Gesamtzahl. */
+    record Brew(String potion, int count) implements TaskSpec {
+        @Override public TaskType type() { return TaskType.BREW; }
     }
 
     /** Werkzeuge/Rüstung reparieren, die unter belowPercent Haltbarkeit liegen (0 = 90). */
@@ -247,8 +265,15 @@ public sealed interface TaskSpec {
         @Override public TaskType type() { return TaskType.BREED; }
     }
 
+    /** Angeln (simuliert): pos = Wurfstelle (null = suchen), catches = noch zu fangen (0 = Vorgabe 6). */
+    record Fish(BlockPos pos, int catches) implements TaskSpec {
+        @Override public TaskType type() { return TaskType.FISH; }
+    }
+
     /** Feld um pos ernten und bestellen. */
-    record Farm(BlockPos pos) implements TaskSpec {
+    record Farm(BlockPos pos, boolean forage, boolean plantBerries) implements TaskSpec {
+        public Farm(BlockPos pos) { this(pos, false, false); }
+        public Farm(BlockPos pos, boolean forage) { this(pos, forage, false); }
         @Override public TaskType type() { return TaskType.FARM; }
     }
 

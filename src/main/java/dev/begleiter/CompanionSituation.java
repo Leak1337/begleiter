@@ -27,12 +27,12 @@ public final class CompanionSituation {
         }
         if (score.need() != Need.ORDER) throw new IllegalArgumentException("Protected need has no alternative ranking");
         if (e.hasScaffold()) {
-            BlockPos target = e.scaffold.stream().min(Comparator.comparingDouble(p -> p.distSqr(e.blockPosition()))).orElse(null);
-            return assess(e, score, target, e.scaffold.size(), 100, 100, "shovel", 0);
+            BlockPos target = e.scaffolding.nearest(e.blockPosition());
+            return assess(e, score, target, e.scaffolding.size(), 100, 100, "shovel", 0);
         }
-        if (e.looseItemsNearby()) {
+        if (e.pickup.looseItemsNearby()) {
             var drops = e.level().getEntitiesOfClass(ItemEntity.class, e.getBoundingBox().inflate(12),
-                    item -> item.isAlive() && item.getAge() < 6000 && e.collectible(item));
+                    item -> item.isAlive() && item.getAge() < 6000 && e.pickup.collectible(item));
             ItemEntity nearest = drops.stream().min(Comparator.comparingDouble(e::distanceToSqr)).orElse(null);
             int capacity = nearest == null ? 0 : capacity(e, nearest.getItem());
             return assess(e, score, nearest == null ? null : nearest.blockPosition(), drops.size(),
@@ -111,7 +111,7 @@ public final class CompanionSituation {
         }
         var context = new SituationalAssessment.Context(
                 percent((int) Math.ceil(e.getHealth() * 100), (int) Math.ceil(e.getMaxHealth() * 100)),
-                e.hunger, 36 - e.usedSlots(), capacity, deficit, work, tier, requiredTier, durability,
+                e.food.level(), 36 - e.usedSlots(), capacity, deficit, work, tier, requiredTier, durability,
                 target == null ? 64 : Math.sqrt(target.distSqr(e.blockPosition())), target != null, danger, exposed);
         return SituationalAssessment.assess(score, context, e.goal == score.need());
     }

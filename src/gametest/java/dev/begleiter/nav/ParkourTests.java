@@ -287,7 +287,7 @@ public class ParkourTests {
         NavContext ctx = new NavContext(c);
         BlockPos a = h.absolutePos(new BlockPos(5, 4, 6)), b = h.absolutePos(new BlockPos(8, 4, 6));
         JumpSim.Plan first = JumpSim.plan(ctx, a.getX(), a.getY(), a.getZ(), b.getX(), b.getY(), b.getZ());
-        h.assertTrue(first != null, "Ausgangssprung nicht möglich: " + JumpSim.lastReject);
+        h.assertTrue(first != null, "Ausgangssprung nicht möglich: " + JumpSim.lastRejection());
         JumpSim.Plan cached = JumpSim.plan(ctx, a.getX(), a.getY(), a.getZ(), b.getX(), b.getY(), b.getZ());
         h.assertTrue(cached == first && ctx.jumpCacheHits == 1, "Sprung unnötig neu simuliert");
         box(h, 6, 5, 3, 7, 8, 9, Blocks.BARRIER);
@@ -414,11 +414,11 @@ public class ParkourTests {
         BlockPos a = h.absolutePos(new BlockPos(5, 8, 6)), b = h.absolutePos(new BlockPos(9, 8, 6));
         JumpSim.Plan narrow = JumpSim.plan(ctx, a.getX(), a.getY(), a.getZ(), b.getX(), b.getY(), b.getZ());
         h.assertTrue(narrow == null, "Sprung auf den Steg erlaubt: " + (narrow == null ? "" : narrow.describe()));
-        LOG.info("[Parkour-Bench] Steg verworfen: {}", JumpSim.lastReject);
+        LOG.info("[Parkour-Bench] Steg verworfen: {}", JumpSim.lastRejection());
         box(h, 9, 1, 3, 14, 7, 9, Blocks.STONE); // jetzt breit
         NavContext wide = new NavContext(c);
         JumpSim.Plan ok = JumpSim.plan(wide, a.getX(), a.getY(), a.getZ(), b.getX(), b.getY(), b.getZ());
-        h.assertTrue(ok != null && ok.unsafeMisses < 3, "Breite Plattform nicht erlaubt: " + (ok == null ? JumpSim.lastReject : ok.describe()));
+        h.assertTrue(ok != null && ok.unsafeMisses < 3, "Breite Plattform nicht erlaubt: " + (ok == null ? JumpSim.lastRejection() : ok.describe()));
         h.succeed();
     }
 

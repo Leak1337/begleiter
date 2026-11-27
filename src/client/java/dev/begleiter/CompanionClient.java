@@ -34,6 +34,9 @@ public class CompanionClient implements ClientModInitializer {
         CompanionPlacementClient.register();
         CompanionZoneClient.register();
         CompanionRemoteMenuClient.register();
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking.registerGlobalReceiver(CompanionWaypointMap.Open.TYPE,
+                (packet, context) -> context.client().execute(() -> context.client().gui.setScreen(
+                        new dev.begleiter.client.gui.WaypointMapScreen(packet))));
         dev.begleiter.debug.BotDebugClient.register();
         CompanionDebugOverlay.register(); // Debug-HUD und Bot-ESP – zum Entfernen diese Zeilen + CompanionDebugOverlay löschen
         // Deutsche Item-Namen für die Chat-Erkennung aus dem installierten Spiel statt aus einer mitgelieferten Kopie.

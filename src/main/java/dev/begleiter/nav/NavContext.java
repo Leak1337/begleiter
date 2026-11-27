@@ -43,6 +43,7 @@ public final class NavContext {
     public boolean allowBreak = true, allowPlace = true, allowParkour = true;
     /** Netherportal betreten (nur wenn das Ziel ein Portalblock ist). */
     public boolean allowPortal;
+    BlockPos endPortalTarget;
     public final Item throwawayItem;
     public final int throwaway;
     public final float health;
@@ -72,6 +73,8 @@ public final class NavContext {
     private final List<BlockPos> protectedCenters = new ArrayList<>();
     static final int PROTECTED_RADIUS = 5;
     private final dev.begleiter.CompanionMemory memory;
+    /** Mitte des eigenen Hauses: Gefahrenpunkte dort (Creeper im Haus, Tod an der Tür) sperren nicht das Zuhause. */
+    private final BlockPos houseCenter;
     private final boolean avoidKnownDanger;
     private final boolean indexedDangers;
     private final List<BlockPos> dangerCenters = new ArrayList<>();
@@ -83,12 +86,17 @@ public final class NavContext {
     private static final int DANGER_INDEX_THRESHOLD = 64, DANGER_CELL_SHIFT = 3;
 
     public NavContext(CompanionEntity mob) {
-        this(mob, dev.begleiter.ai.CompanionDecisionEngine.enabled()
+        this(mob, mob.work.active() || mob.scopedStockWork() || dev.begleiter.ai.CompanionDecisionEngine.enabled()
                 && mob.goal == dev.begleiter.CompanionNeeds.Need.SUPPLY);
     }
 
     public NavContext(CompanionEntity mob, boolean avoidKnownDanger) {
         this(mob, new BlockCache((ServerLevel) mob.level()), mob.getHealth(), mob.scaffoldCount(), avoidKnownDanger);
+        if (mob.scopedStockWork() || mob.work.active()) {
+            allowBreak = false;
+            allowPlace = false;
+            allowParkour = false;
+        }
     }
 
     NavContext(CompanionEntity mob, BlockCache blocks, float projectedHealth, int availableBlocks, boolean avoidKnownDanger) {
@@ -102,6 +110,7 @@ public final class NavContext {
         this.blocks = blocks;
         refreshWorldBorder();
         memory = mob.memory;
+        houseCenter = mob.houseInside();
         this.avoidKnownDanger = avoidKnownDanger;
         this.indexedDangers = indexedDangers;
         refreshDangers();
@@ -134,16 +143,19 @@ public final class NavContext {
         fallProtection = Math.min(20, prot);
         health = projectedHealth;
         int mf = 0;
-        while (mf < Costs.MAX_FALL_TABLE && health - fallDamage(mf + 1) >= MIN_HEALTH_AFTER_FALL) mf++;
+        // Stürze ohne Schaden (bis 3 Blöcke) immer erlaubt: sonst durfte er mit wenig Leben nicht einmal eine Stufe
+        // hinab und kam weder aus dem Haus noch zur Ernte (beobachtet: tagelang mit 5 Leben "unerreichbar")
+        while (mf < Costs.MAX_FALL_TABLE && (fallDamage(mf + 1) <= 0 || health - fallDamage(mf + 1) >= MIN_HEALTH_AFTER_FALL)) mf++;
         maxFall = mf;
 
-        canSprint = mob.hunger > 6;
+        canSprint = mob.food.level() > 6;
         // Sprung-Körper: Grundtempo ohne Sprint-Bonus (+30 %), Tempo-Faktor wie in der Ausführung
         double base = mob.getAttributeValue(Attributes.MOVEMENT_SPEED) / (mob.isSprinting() ? 1.3 : 1);
         body = new JumpSim.Body(mob.getBbWidth() / 2, mob.getBbHeight(), base * Movement.WALK_SPEED,
                 base * 1.3 * Movement.WALK_SPEED, mob.navJumpPower(), mob.getGravity());
-        inStronghold = mob.inStronghold();
         nether = level.dimension() == Level.NETHER;
+        // Auf dem Lohenausflug Festungsmauern aufbrechen wie ein Spieler (beobachtet: Weg zum Spawner "unerreichbar")
+        inStronghold = mob.inStronghold() || nether && mob.netherTrip;
         waterBucket = mob.findItem(Items.WATER_BUCKET) >= 0;
         throwawayItem = mob.scaffoldItem();
         throwaway = throwawayItem == null ? 0 : Math.max(0, availableBlocks);
@@ -152,6 +164,8 @@ public final class NavContext {
         for (var e : mob.badSteps.entrySet()) if (e.getValue() > mob.tickCount) favoring.put(e.getKey().asLong(), BAD_STEP_FACTOR);
         addThreats(mob);
         mob.routes.applyTo(favoring, RouteMemory.worldKey(level));
+        // Darf der Besitzer nicht bauen (Abenteuer), plant auch die Suche weder Abbau noch Brücken/Säulen
+        if (!dev.begleiter.world.BuildPermission.ownerMayBuild(mob)) { allowBreak = false; allowPlace = false; }
     }
 
     static final int THREAT_SCAN = 24;
@@ -219,6 +233,7 @@ public final class NavContext {
 
     /** Darf er das ernten (bei Blöcken, die das passende Werkzeug brauchen)? */
     public boolean canHarvest(BlockState s) {
+        if (s == null) return false; // ungeladener Chunk: lieber nicht abbauen (sonst NullPointerException in der Wegfindung)
         if (!s.requiresCorrectToolForDrops()) return true;
         for (Tool t : tools) if (!t.stack.isEmpty() && t.stack.isCorrectToolForDrops(s)) return true;
         return false;
@@ -299,6 +314,7 @@ public final class NavContext {
         if (BlockFlags.has(f, BlockFlags.UNLOADED)) return Costs.INF;
         if (BlockFlags.has(f, BlockFlags.PASS)) return 0;
         if (BlockFlags.has(f, BlockFlags.PORTAL)) return allowPortal ? 0 : Costs.INF;
+        if (BlockFlags.has(f, BlockFlags.END_PORTAL)) return canEnterEndPortal(x, y, z) ? 0 : Costs.INF;
         if (!allowBreak) return Costs.INF;
         BlockState s = blocks.get(x, y, z);
         if (!mayBreakAt(x, y, z, s, f) || isProtected(x, y, z)) return Costs.INF;
@@ -374,16 +390,42 @@ public final class NavContext {
         String dimension = level.dimension().identifier().toString();
         for (var p : memory.all())
             if ((p.kind == dev.begleiter.CompanionMemory.Kind.DANGER || p.kind == dev.begleiter.CompanionMemory.Kind.DEATH)
-                    && p.dim.equals(dimension)) dangerCenters.add(p.pos);
+                    && !mobDeath(p.key)
+                    && p.dim.equals(dimension) && !nearHouse(p.pos)) dangerCenters.add(p.pos);
         useDangerIndex = indexedDangers && dangerCenters.size() > DANGER_INDEX_THRESHOLD;
     }
 
+    /**
+     * Beobachtet: eine Creeper-Explosion im Haus machte das Innere zur "Gefahr", danach war jeder Weg aus dem und ins Haus
+     * "unerreichbar" (auch 2 Blöcke weit). Am eigenen Haus zählen gemerkte Gefahren deshalb nicht.
+     */
+    /**
+     * Von Monstern getötet (Zombie, Pfeil, Creeper ...): der Ort selbst ist nicht gefährlich. Beobachtet: viele solche Tode
+     * zwischen Haus und Feld sperrten den Weg zur reifen Ernte, während er hungerte. Gelände-Tode (Lava, Sturz, Feuer,
+     * Ertrinken, Ersticken) bleiben gesperrt.
+     */
+    private static boolean mobDeath(String cause) {
+        if (cause == null) return false;
+        return cause.startsWith("mob") || cause.startsWith("player") || cause.startsWith("arrow") || cause.startsWith("explosion")
+                || cause.startsWith("thrown") || cause.startsWith("trident") || cause.startsWith("sting")
+                || cause.startsWith("fireball") || cause.startsWith("witherSkull") || cause.startsWith("sonic");
+    }
+
+    private boolean nearHouse(BlockPos p) {
+        return houseCenter != null && Math.abs(p.getX() - houseCenter.getX()) <= 6 && Math.abs(p.getZ() - houseCenter.getZ()) <= 6
+                && Math.abs(p.getY() - houseCenter.getY()) <= 4;
+    }
+
     /** Veränderliche Regeln für eine über mehrere Scheiben verteilte Abschlussprüfung. */
-    record VerificationPolicy(boolean allowBreak, boolean allowPlace, boolean allowParkour, boolean allowPortal,
+    boolean canEnterEndPortal(int x, int y, int z) {
+        return endPortalTarget != null && endPortalTarget.getX() == x && endPortalTarget.getY() == y && endPortalTarget.getZ() == z;
+    }
+
+    record VerificationPolicy(boolean allowBreak, boolean allowPlace, boolean allowParkour, boolean allowPortal, BlockPos endPortalTarget,
                               List<BlockPos> dangers) {}
 
     VerificationPolicy verificationPolicy() {
-        return new VerificationPolicy(allowBreak, allowPlace, allowParkour, allowPortal, List.copyOf(dangerCenters));
+        return new VerificationPolicy(allowBreak, allowPlace, allowParkour, allowPortal, endPortalTarget, List.copyOf(dangerCenters));
     }
 
     private int dangerDistance(int x, int y, int z) {

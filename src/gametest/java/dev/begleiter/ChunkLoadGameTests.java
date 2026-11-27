@@ -69,9 +69,9 @@ public class ChunkLoadGameTests {
         var c = companion(h, far);
         c.stay();
         var sl = h.getLevel();
-        c.storageChests(sl);
+        c.storage.storageChests(sl);
         assertNothingLoaded(h, far, "storageChests");
-        c.nearestPortal(8);
+        c.portals.nearest(8);
         assertNothingLoaded(h, far, "nearestPortal");
         c.memory.verify(c, sl);
         assertNothingLoaded(h, far, "memory.verify");

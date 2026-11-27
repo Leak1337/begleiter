@@ -48,6 +48,12 @@ public class SchematicImportGameTests {
         c.buildMovementOverride = CompanionEntity.BuildMovement.GHOST;
         var placed = CompanionSchematics.placeFull(plan, h.absolutePos(new net.minecraft.core.BlockPos(48, 1, 2)),
                 net.minecraft.core.Direction.SOUTH, Rotation.NONE, false);
+        // Wie im Spiel auf festem Boden bauen: sonst fällt Redstone in der untersten Lage mangels Unterlage ab
+        int bottom = placed.blocks().keySet().stream().mapToInt(net.minecraft.core.BlockPos::getY).min().orElse(0);
+        for (var pos : placed.blocks().keySet()) {
+            var below = new net.minecraft.core.BlockPos(pos.getX(), bottom - 1, pos.getZ());
+            if (h.getLevel().getBlockState(below).isAir()) h.getLevel().setBlockAndUpdate(below, net.minecraft.world.level.block.Blocks.SMOOTH_STONE.defaultBlockState());
+        }
         c.build = CompanionBuilder.create(h.getLevel(), name, placed.blocks());
         c.build.entities.addAll(placed.entities());
         c.addTask(CompanionEntity.Task.build());

@@ -132,7 +132,7 @@ public class ProjectMemoryTextGameTests {
         c.addTask(CompanionEntity.Task.gather("holz", 3)); var queued = c.peekTasks(10);
         var iron = c.memory.remember(CompanionMemory.Kind.ORE, "eisen", h.getLevel(), from.east(10)); iron.count = 4;
         c.memory.remember(CompanionMemory.Kind.ORE, "eisen", h.getLevel(), from.east(40));
-        c.memory.all().add(new CompanionMemory.Place(CompanionMemory.Kind.ORE, "eisen", "minecraft:the_nether", from.east(1), 0));
+        c.memory.add(new CompanionMemory.Place(CompanionMemory.Kind.ORE, "eisen", "minecraft:the_nether", from.east(1), 0));
         var known = wire(h, CompanionChatActions.interpretReply(p, c, "where is iron", "en_us"));
         translated(h, known, "Ich kenne Eisen: 4 Blöcke", "I know of iron: 4 blocks");
         ServerTextGameTests.inLanguage("en_us", () -> h.assertTrue(known.getString().contains("2 locations in total")

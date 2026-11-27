@@ -12,6 +12,7 @@ import dev.begleiter.task.TaskSpec;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -56,6 +57,7 @@ public final class CompanionTexts {
 
     public static Component mode(CompanionEntity c) {
         if (c.duty() != null) return tr("mode." + c.duty().name().toLowerCase(Locale.ROOT));
+        if (c.work.enabled()) return tr("mode.work");
         return tr("mode." + (c.isKeeper() ? "keeper" : c.isStaying() ? "stay" : c.isAutonomous() ? "free" : "follow"));
     }
 
@@ -148,6 +150,7 @@ public final class CompanionTexts {
                 case TaskSpec.Process spec -> spec.count();
                 case TaskSpec.Request spec -> spec.count();
                 case TaskSpec.Breed spec -> spec.pairs(); case TaskSpec.Trade spec -> spec.count();
+                case TaskSpec.Fish spec -> spec.catches();
                 default -> 0;
             };
             if (amount > 0) text.append(tr("activity.amount", amount));
@@ -178,10 +181,28 @@ public final class CompanionTexts {
     }
 
     public static Component status(CompanionEntity c) {
-        return tr("status", mode(c), c.isPaused() ? tr("status.paused") : Component.empty(), activity(c), c.taskCount(),
+        var message = tr("status", mode(c), c.isPaused() ? tr("status.paused") : Component.empty(), activity(c), c.taskCount(),
                 c.usedSlots(), (int) c.getHealth(), (int) c.getMaxHealth(),
                 c.getHome() == null ? tr("status.no_home") : literal(c.getHome().toShortString()),
                 tr(c.isHouseBuilt() ? "status.yes" : "status.no"), stance(c.stance));
+        for (Task task : c.peekTasks(dev.begleiter.task.TaskQueueCodec.MAX_TASKS)) {
+            if (!(task.spec() instanceof TaskSpec.Request r) || r.phase() == 4) continue;
+            if (r.homeOrder()) {
+                var box = c.level() instanceof ServerLevel level ? CompanionTripPreparation.homeOrderStorage(c, level, r.pos()) : null;
+                Component progress = box != null ? tr("order.status_home", box.countItem(ItemIds.resolve(r.item())), r.count(), item(r.item()))
+                        : r.phase() == 5 ? tr("order.status_waiting", r.count(), item(r.item()))
+                        : tr("order.status_last", r.baseline(), r.count(), item(r.item()));
+                message.append("\n").append(progress);
+            } else if (r.phase() == 1 || r.phase() == 2) {
+                int held = CompanionCraft.count(c, r.item()) - (r.phase() == 1 ? r.baseline() : 0);
+                message.append("\n").append(tr("order.status_ready", Math.clamp(held, 0, r.count()), r.count(), item(r.item())));
+            }
+            break;
+        }
+        if (c.isPaused() && !c.pausedReason().getString().isBlank()) message.append("\n").append(c.pausedReason());
+        if (c.work.enabled() && c.level() instanceof ServerLevel world) message.append("\n").append(c.work.status(world));
+        if (c.journey.hasGoal()) message.append("\n").append(c.journey.status());
+        return message;
     }
 
     public static Component join(java.util.List<? extends Component> parts, String separator) {

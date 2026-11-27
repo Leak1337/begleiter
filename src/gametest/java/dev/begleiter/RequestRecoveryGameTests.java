@@ -132,8 +132,11 @@ public class RequestRecoveryGameTests {
     @GameTest(structure = ARENA)
     public void request_recovery_station_can_be_replaced_without_duplicate_production(GameTestHelper h) {
         var mob = companion(h); var owner = owner(h, mob);
-        mob.giveToInventory(new ItemStack(Items.STONE));
         mob.giveToInventory(new ItemStack(Items.STONE_SLAB, 3));
+        // Block every alternative acquisition until the owner supplies an input and a station.
+        for (int slot = 0; slot < mob.getInventory().getContainerSize(); slot++) {
+            if (mob.getInventory().getItem(slot).isEmpty()) mob.getInventory().setItem(slot, new ItemStack(Items.BEDROCK, 64));
+        }
         mob.addTask(Task.process("stone_slab", 2, "minecraft:stone_slab_from_stone_stonecutting"));
         mob.addTask(new Task(new TaskSpec.Request("stone_slab", 2, false, 1, 3)));
         var goal = new CompanionTaskGoal(mob);
@@ -141,12 +144,73 @@ public class RequestRecoveryGameTests {
         h.assertTrue(mob.isPaused() && mob.taskCount() == 2, "Missing station discarded order");
         h.assertValueEqual(count(owner, Items.STONE_SLAB), 0, "Old stock delivered as fresh production");
         h.setBlock(26, 1, 24, Blocks.STONECUTTER);
+        mob.getInventory().setItem(mob.findItem(Items.BEDROCK), new ItemStack(Items.STONE));
         CompanionBrain.resumeReply(mob);
         tick(mob, goal, 90);
         h.assertTrue(!mob.hasTasks(), "Restored station did not resume processing");
         h.assertValueEqual(count(owner, Items.STONE_SLAB), 2, "Wrong fresh delivery");
         h.assertValueEqual(CompanionCraft.count(mob, "stone_slab"), 3, "Existing stock changed");
         h.assertValueEqual(CompanionCraft.count(mob, "stone"), 0, "Input not processed exactly once");
+        h.succeed();
+    }
+
+    @GameTest(structure = ARENA)
+    public void request_recovery_replans_after_furnace_disappears(GameTestHelper h) {
+        var mob = companion(h);
+        var owner = owner(h, mob);
+        var furnace = new BlockPos(26, 1, 24);
+        h.setBlock(furnace, Blocks.FURNACE);
+        mob.giveToInventory(new ItemStack(Items.FURNACE));
+        mob.giveToInventory(new ItemStack(Items.RAW_IRON, 3));
+        mob.giveToInventory(new ItemStack(Items.COAL));
+        mob.giveToInventory(new ItemStack(Items.IRON_INGOT, 2));
+        mob.addTask(Task.request("iron_ingot", 3, false));
+        var goal = new CompanionTaskGoal(mob);
+        tick(mob, goal, 61);
+        h.assertValueEqual(CompanionCraft.count(mob, "iron_ingot"), 3, "First ingot was not smelted");
+        h.setBlock(furnace, Blocks.AIR);
+        tick(mob, goal, 1);
+        h.assertTrue(!mob.isPaused() && mob.currentTask().spec() instanceof TaskSpec.Station,
+                "Missing furnace did not trigger a replacement plan");
+        tick(mob, goal, 1);
+        var replacement = mob.findStation("furnace", 24);
+        h.assertTrue(replacement != null, "The spare furnace was not placed");
+        // The test drives handlers directly, without movement ticks.
+        mob.snapTo(replacement.getX() + 0.5, replacement.getY(), replacement.getZ() + 1.5, 0, 0);
+        owner.snapTo(mob.getX(), mob.getY(), mob.getZ(), 0, 0);
+        tick(mob, goal, 130);
+        h.assertTrue(!mob.hasTasks() && !mob.isPaused(), "Replacement furnace did not finish the order");
+        h.assertValueEqual(count(owner, Items.IRON_INGOT), 3, "Wrong actual delivery");
+        h.assertValueEqual(CompanionCraft.count(mob, "iron_ingot"), 2, "Original stock was delivered");
+        h.succeed();
+    }
+
+    @GameTest(structure = ARENA)
+    public void request_recovery_partial_delivery_after_reload_preserves_baseline(GameTestHelper h) {
+        var mob = companion(h);
+        var owner = owner(h, mob);
+        for (int slot = 0; slot < net.minecraft.world.entity.player.Inventory.INVENTORY_SIZE; slot++)
+            owner.getInventory().setItem(slot, new ItemStack(Items.DIRT, 64));
+        owner.getInventory().setItem(0, new ItemStack(Items.STONE_SLAB, 62));
+        mob.giveToInventory(new ItemStack(Items.STONE_SLAB, 7));
+        mob.giveToInventory(new ItemStack(Items.STONE));
+        mob.addTask(new Task(new TaskSpec.Request("stone_slab", 4, false, 1, 3)));
+        tick(mob, new CompanionTaskGoal(mob), 1);
+        h.assertValueEqual(count(owner, Items.STONE_SLAB), 64, "Expected only two slabs to fit");
+        mob.getInventory().getItem(mob.findItem(Items.STONE_SLAB)).shrink(2);
+
+        var out = TagValueOutput.createWithContext(ProblemReporter.DISCARDING, h.getLevel().registryAccess());
+        mob.saveWithoutId(out);
+        var restored = new CompanionEntity(CompanionMod.COMPANION, h.getLevel());
+        restored.load(TagValueInput.create(ProblemReporter.DISCARDING, h.getLevel().registryAccess(), out.buildResult()));
+        h.assertTrue(restored.currentTask().spec() instanceof TaskSpec.Request request
+                && request.count() == 2 && request.baseline() == 3, "Open quantity or original stock lost on reload");
+        owner.getInventory().setItem(1, ItemStack.EMPTY);
+        h.setBlock(26, 1, 24, Blocks.STONECUTTER);
+        tick(restored, new CompanionTaskGoal(restored), 90);
+        h.assertTrue(!restored.hasTasks() && !restored.isPaused(), "Remaining delivery did not complete");
+        h.assertValueEqual(count(owner, Items.STONE_SLAB), 66, "Reload duplicated or skipped part of the delivery");
+        h.assertValueEqual(CompanionCraft.count(restored, "stone_slab"), 3, "Original stock was delivered");
         h.succeed();
     }
 

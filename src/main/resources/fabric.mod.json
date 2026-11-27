@@ -5,7 +5,7 @@
   "name": "Begleiter",
   "description": "A craftable companion that plays Minecraft like a second player: follows orders, gathers, mines, crafts, builds farms and schematics, remembers the world and can progress on its own.",
   "authors": ["Leak1337"],
-  "license": ["MIT", "LGPL-3.0-or-later"],
+  "license": ["Apache-2.0", "LGPL-3.0-or-later"],
   "icon": "assets/begleiter/icon.png",
   "contact": {
     "homepage": "https://github.com/Leak1337/begleiter",
@@ -13,6 +13,7 @@
     "issues": "https://github.com/Leak1337/begleiter/issues"
   },
   "environment": "*",
+  "mixins": ["begleiter.mixins.json"],
   "entrypoints": {
     "main": ["dev.begleiter.CompanionMod"],
     "client": ["dev.begleiter.CompanionClient"]

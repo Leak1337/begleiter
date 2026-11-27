@@ -94,7 +94,7 @@ public record CompanionSnapshot(int containerId, UUID npc, int page, String name
         return new CompanionSnapshot(containerId, c.getUUID(), page.id, text(c.getDisplayName().getString()),
                 c.getHealth(), c.getMaxHealth(),
                 c.isKeeper() ? 3 : c.isStaying() ? 1 : c.isAutonomous() ? 2 : c.duty() != null ? c.duty().mode : 0,
-                c.isPaused(), CompanionTexts.activity(c), c.taskCount(), c.usedSlots(), c.hunger,
+                c.isPaused(), CompanionTexts.activity(c), c.taskCount(), c.usedSlots(), c.food.level(),
                 c.stageComponent(), c.uiFeedbackComponent(), CompanionTexts.needs(c), CompanionTexts.hazards(c),
                 CompanionTexts.target(c),
                 c.build == null ? -1 : c.build.percent(), materials.size(), missingItems(c, materials),

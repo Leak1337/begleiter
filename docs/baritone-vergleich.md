@@ -86,7 +86,7 @@ Nachweis: Der neue Lava-Test scheitert im bisherigen Code mit „Laufende Bewegu
 läuft weiter in neue Lava“. Die angepasste Version besteht alle 60
 Wegfindungstests, einschließlich dieses Tests und der Wassereimer-Landung.
 
-Unser eigener Code bleibt MIT. Nur die ausdrücklich gekennzeichneten übernommenen
+Unser eigener Code steht unter Apache-2.0. Nur die ausdrücklich gekennzeichneten übernommenen
 Dateien stehen unter LGPL-3.0-or-later.
 
 ## Fortsetzung: Suchcaches und identische Flüge

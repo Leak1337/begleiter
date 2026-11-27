@@ -85,13 +85,13 @@ public class BotDebugGameTests {
     public void ohneAdminrechteGeschiehtNichts(GameTestHelper h) {
         floor(h);
         CompanionEntity c = bot(h, new BlockPos(2, 1, 2));
-        c.hunger = 15;
+        c.food.set(15);
         ServerPlayer p = admin(h, false);
         h.assertTrue(!BotDebugServer.allowed(p), "Spieler ohne Rechte gilt als berechtigt");
         for (int action = BotDebug.A_PAUSE; action <= BotDebug.A_HUNGER; action++)
             h.assertTrue(BotDebugServer.execute(p, cmd(c, action, 1, 70, 1)) == null, NOT_ALLOWED + " (Aktion " + action + ")");
         h.assertTrue(!c.isPaused() && !c.isDebugFrozen(), NOT_ALLOWED);
-        h.assertTrue(c.hunger == 15 && !c.hasTasks(), NOT_ALLOWED);
+        h.assertTrue(c.food.level() == 15 && !c.hasTasks(), NOT_ALLOWED);
         h.succeed();
     }
 
@@ -130,9 +130,9 @@ public class BotDebugGameTests {
         BotDebugServer.execute(p, cmd(c, BotDebug.A_HEALTH, 12, 0, 0));
         h.assertTrue(c.getHealth() == 12, "Leben nicht gesetzt: " + c.getHealth());
         BotDebugServer.execute(p, cmd(c, BotDebug.A_HUNGER, 99, 0, 0));
-        h.assertTrue(c.hunger == 20, "Hunger nicht begrenzt: " + c.hunger);
+        h.assertTrue(c.food.level() == 20, "Hunger nicht begrenzt: " + c.food.level());
         BotDebugServer.execute(p, cmd(c, BotDebug.A_HUNGER, 5, 0, 0));
-        h.assertTrue(c.hunger == 5, "Hunger nicht gesetzt");
+        h.assertTrue(c.food.level() == 5, "Hunger nicht gesetzt");
         BotDebugServer.execute(p, cmd(c, BotDebug.A_TELEPORT, 0, 0, 0));
         h.assertTrue(c.distanceToSqr(p) < 4, "Teleport zum Spieler fehlgeschlagen");
         h.assertTrue(BotDebugServer.execute(p, new BotDebug.Command(UUID.randomUUID(), BotDebug.A_PAUSE, 0, 0, 0)) != null,

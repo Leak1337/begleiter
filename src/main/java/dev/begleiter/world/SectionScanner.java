@@ -59,4 +59,44 @@ public final class SectionScanner {
         }
         return new Result(reads, chunks, skipped, true);
     }
+
+    /**
+     * Quader (Grenzen einschließlich) nach Blöcken durchsuchen, die das Prädikat erfüllen. Ungeladene Chunks bleiben
+     * ungeladen und werden übersprungen; Abschnitte ohne passenden Eintrag in ihrer Palette werden mit einer einzigen
+     * Prüfung übersprungen. Die Besuchsreihenfolge ist nicht festgelegt: Wer nach Abstand wählt, muss Gleichstände
+     * selbst auflösen. Luft wird nie gemeldet; das Prädikat darf nur vom Blockzustand abhängen.
+     */
+    public static Result scanBox(ServerLevel level, net.minecraft.core.BlockPos a, net.minecraft.core.BlockPos b,
+                                 Predicate<BlockState> predicate, Visitor visitor) {
+        int minX = Math.min(a.getX(), b.getX()), maxX = Math.max(a.getX(), b.getX());
+        int minZ = Math.min(a.getZ(), b.getZ()), maxZ = Math.max(a.getZ(), b.getZ());
+        int minY = Math.max(Math.min(a.getY(), b.getY()), level.getMinY());
+        int maxY = Math.min(Math.max(a.getY(), b.getY()), level.getMaxY());
+        long reads = 0;
+        int chunks = 0, skipped = 0;
+        if (minY > maxY) return new Result(0, 0, 0, true);
+        for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
+            for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
+                var chunk = level.getChunkSource().getChunkNow(cx, cz);
+                chunks++;
+                if (chunk == null) continue;
+                int x0 = Math.max(minX, cx << 4), x1 = Math.min(maxX, (cx << 4) | 15);
+                int z0 = Math.max(minZ, cz << 4), z1 = Math.min(maxZ, (cz << 4) | 15);
+                for (int sy = minY >> 4; sy <= maxY >> 4; sy++) {
+                    LevelChunkSection section = chunk.getSection(level.getSectionIndexFromSectionY(sy));
+                    if (section.hasOnlyAir() || !section.maybeHas(predicate)) { skipped++; continue; }
+                    int y0 = Math.max(minY, sy << 4), y1 = Math.min(maxY, (sy << 4) | 15);
+                    for (int y = y0; y <= y1; y++)
+                        for (int z = z0; z <= z1; z++)
+                            for (int x = x0; x <= x1; x++) {
+                                BlockState state = section.getBlockState(x & 15, y & 15, z & 15);
+                                reads++;
+                                if (!state.isAir() && predicate.test(state) && !visitor.visit(x, y, z, state))
+                                    return new Result(reads, chunks, skipped, false);
+                            }
+                }
+            }
+        }
+        return new Result(reads, chunks, skipped, true);
+    }
 }

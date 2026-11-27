@@ -19,6 +19,14 @@ import dev.begleiter.CompanionEntity.TaskType;
 final class HuntHandler implements TaskHandler {
     private final Task task;
     private final TaskSpec.Hunt hunt;
+    /** Geschützter Modus: Rückwegprüfung zum gewählten Tier und die Stelle, für die sie galt. */
+    private dev.begleiter.nav.RoundTripCheck trip;
+    private Mob tripFor;
+    private net.minecraft.core.BlockPos checkedAt;
+    /** So weit darf sich ein geprüftes Tier entfernen, bevor neu geprüft wird (Blöcke). */
+    static final int MOVED_RECHECK = 8;
+    /** Tier ohne nachgewiesenen Rückweg so lange nicht wieder wählen (Ticks). */
+    static final int SKIP_TICKS = 600;
 
     HuntHandler(Task task) {
         this.task = task;
@@ -31,6 +39,14 @@ final class HuntHandler implements TaskHandler {
         int goal = Math.max(2, hunt.food());
         Mob h = mob.huntTarget;
         if (h != null && h.isAlive()) {
+            // geprüftes Tier ist weit weggelaufen: den Nachweis nicht stillschweigend weiterverwenden
+            if (ctx.guardedSupply() && checkedAt != null && h.blockPosition().distSqr(checkedAt) > MOVED_RECHECK * MOVED_RECHECK) {
+                mob.logInfo(CompanionTexts.tr("handler.hunt.moved", h.getName()));
+                mob.huntTarget = null;
+                mob.setTarget(null);
+                checkedAt = null;
+                return Status.RUNNING;
+            }
             mob.setTarget(h);
             return Status.RUNNING;
         }
@@ -51,10 +67,41 @@ final class HuntHandler implements TaskHandler {
             return finish(mob, Status.DONE);
         }
         if (walkCloser(ctx, nearest)) return Status.RUNNING;
+        if (ctx.guardedSupply()) {
+            Status checked = checkTrip(ctx, nearest);
+            if (checked != null) return checked;
+        }
         mob.huntTarget = nearest;
         mob.setTarget(nearest);
         mob.logInfo(CompanionTexts.tr("handler.hunt.target", nearest.getName(), nearest.blockPosition().toShortString()));
         return Status.RUNNING;
+    }
+
+    /**
+     * Geschützter Modus: Hin- und Rückweg zum Tier nachweisen, bevor er es angreift. Ohne Nachweis (UNSAFE oder
+     * UNPROVEN) bleibt dieses Tier eine Weile außen vor; die Jagd als Methode wird nicht bestraft. null = freigegeben.
+     */
+    private Status checkTrip(TaskContext ctx, Mob animal) {
+        CompanionEntity mob = ctx.mob();
+        if (trip == null || tripFor != animal) {
+            mob.getNavigation().stop();
+            mob.nav.stop();
+            trip = new dev.begleiter.nav.RoundTripCheck(mob, animal.blockPosition(), 3 * 3);
+            tripFor = animal;
+        }
+        var status = trip.step();
+        if (status == dev.begleiter.nav.RoundTripCheck.Status.CHECKING) return Status.RUNNING;
+        var result = trip;
+        trip = null;
+        tripFor = null;
+        if (status != dev.begleiter.nav.RoundTripCheck.Status.SAFE) {
+            mob.logInfo(CompanionTexts.tr(status == dev.begleiter.nav.RoundTripCheck.Status.UNSAFE
+                    ? "handler.hunt.route_unsafe" : "handler.hunt.route_unproven", animal.getName(), result.reasonComponent()));
+            mob.ignoreTarget(animal, SKIP_TICKS);
+            return Status.RUNNING; // nächster Tick: nächstes Tier
+        }
+        checkedAt = animal.blockPosition().immutable();
+        return null;
     }
 
     /** Jagd vorbei: mit Ofen in der Nähe das rohe Fleisch gleich braten. */

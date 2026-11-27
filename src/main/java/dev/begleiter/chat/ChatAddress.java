@@ -31,9 +31,20 @@ public final class ChatAddress {
 
     /** null bedeutet: keine eindeutige Ansprache oder kein Befehl; dann bleibt alles unverändert. */
     public static Command parse(String raw, List<Candidate> candidates) {
+        return parse(raw, candidates, "@");
+    }
+
+    /** Wie {@link #parse(String, List)} mit eigenem Anrede-Präfix (Konfiguration). */
+    public static Command parse(String raw, List<Candidate> candidates, String prefixMark) {
         if (candidates.isEmpty() || raw == null) return null;
+        if (prefixMark == null || prefixMark.isEmpty()) prefixMark = "@";
         String leading = raw.stripLeading();
-        boolean prefix = leading.startsWith("@");
+        boolean prefix = leading.startsWith(prefixMark);
+        if (prefix && !prefixMark.equals("@")) {
+            // Eigenes Präfix wie "@" behandeln: danach greift dieselbe Logik für Name/Anrede
+            raw = "@" + leading.substring(prefixMark.length());
+            leading = raw;
+        }
         boolean attached = prefix && leading.length() > 1 && !Character.isWhitespace(leading.charAt(1));
         String text = ChatText.normalize(raw);
         if (text.isEmpty()) return null;
@@ -67,6 +78,16 @@ public final class ChatAddress {
         if (named != null) source = removeSourceAddress(source, named.name());
         if (generic != null) source = removeSourceAddress(source, generic);
         return command.isBlank() ? null : new Command(target.id(), command, source.strip());
+    }
+
+    /** Ohne Ansprache (Konfiguration NEVER/AUTO): ganze Zeile an den nächsten eigenen Begleiter. */
+    public static Command unaddressed(String raw, List<Candidate> candidates) {
+        if (candidates.isEmpty() || raw == null) return null;
+        String text = ChatText.normalize(raw);
+        if (text.isBlank()) return null;
+        Candidate target = candidates.stream()
+                .min(Comparator.comparingDouble(Candidate::distanceSquared).thenComparing(Candidate::id)).orElseThrow();
+        return new Command(target.id(), text, raw.strip());
     }
 
     /** Satzzeichen in Item-IDs behalten und nur die oben schon geprüfte Anrede entfernen. */

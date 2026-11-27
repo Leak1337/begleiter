@@ -74,6 +74,23 @@ loom {
             name "Schematic showcase"
             programArgs "--quickPlaySingleplayer", providers.gradleProperty("showcaseWorld").getOrElse("Schematic-Schauwelt")
         }
+        // .\gradlew runSelfplay: Dedicated Server ohne Client, ein Bot-Spieler setzt den Begleiter und lässt ihn allein
+        // bis zum Enderdrachen spielen (dev.begleiter.SelfPlayRun). Neue Welt: Ordner run-selfplay/world löschen.
+        // Protokoll: run-selfplay/selfplay-log.txt. -PselfplayMaxDays=40, -PselfplayGoal="...", -PselfplaySprint=false
+        selfplay {
+            inherit server
+            name "Selfplay"
+            runDir "run-selfplay"
+            vmArg "-Dbegleiter.selfplay=true"
+            vmArg "-Xmx6G"
+            if (providers.gradleProperty("selfplayMaxDays").isPresent())
+                vmArg "-Dbegleiter.selfplay.maxTicks=${Long.parseLong(providers.gradleProperty('selfplayMaxDays').get()) * 24000L}"
+            if (providers.gradleProperty("selfplayGoal").isPresent())
+                vmArg "-Dbegleiter.selfplay.goal=${providers.gradleProperty('selfplayGoal').get()}"
+            if (providers.gradleProperty("selfplaySprint").isPresent())
+                vmArg "-Dbegleiter.selfplay.sprint=${providers.gradleProperty('selfplaySprint').get()}"
+            programArgs "nogui"
+        }
         // .\gradlew runTestmap: startet direkt in die Welt "Testmap" und baut dort beim ersten Betreten das
         // Testgelände (dev.begleiter.TestMap). -PtestmapRun=alle (oder name,name) startet gleich die Szenarien;
         // Ergebnisse: run/saves/Testmap/begleiter-testmap-ergebnisse.txt
@@ -123,7 +140,7 @@ def sourceDistribution = tasks.register('sourceDistribution', Zip) {
     from(projectDir) {
         include 'src/**', 'gradle/**', 'gradlew', 'gradlew.bat'
         include 'build.gradle', 'settings.gradle', 'gradle.properties'
-        include 'LICENSE', 'LICENSES/**', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README.de.md', 'CHANGELOG.md'
+        include 'LICENSE', 'NOTICE', 'LICENSES/**', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README.de.md', 'CHANGELOG.md'
         include 'tools/benchmarks/**', 'tools/compare-pathing.gradle', 'docs/baritone-vergleich.md'
         include 'tools/build_request_storage.py', 'tools/request_storage_materials.json', 'tools/write_request_storage_report.py'
         include 'tools/build_survival_storage.py', 'docs/survival-kistenraum-12.md'
@@ -139,7 +156,7 @@ tasks.withType(AbstractArchiveTask).configureEach {
 }
 
 tasks.withType(Jar).configureEach {
-    from('LICENSE')
+    from('LICENSE', 'NOTICE')
     from('THIRD_PARTY_NOTICES.md')
     from('LICENSES') { into 'LICENSES' }
 }
@@ -271,7 +288,7 @@ tasks.register("verifyPackagedMod") {
                 throw new GradleException('Mod-JAR enthält eine abweichende Modversion')
             if (metadata.icon == null || archive.getEntry(metadata.icon) == null)
                 throw new GradleException('Mod-Icon fehlt im Mod-JAR')
-            ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'META-INF/begleiter-sources.zip'].each { required ->
+            ['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md', 'META-INF/begleiter-sources.zip'].each { required ->
                 if (archive.getEntry(required) == null) throw new GradleException("${required} fehlt im Mod-JAR")
             }
             if (archive.entries().toList().any { it.name.contains('GameTest') || it.name.endsWith('ClientTest.class') })

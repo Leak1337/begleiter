@@ -29,12 +29,16 @@ final class BreakHandler implements TaskHandler {
     private static final double REACH_SQR = 4.5 * 4.5;
 
     private final Task task;
+    private final TaskSpec.Break spec;
+    private dev.begleiter.nav.RoundTripCheck checkedRoute;
+    private boolean checkedPathInstalled;
     private int progress, total;
     /** Risse angezeigt (auch wenn progress für einen Neuanlauf wieder 0 ist). */
     private boolean cracked;
 
     BreakHandler(Task task) {
         this.task = task;
+        this.spec = (TaskSpec.Break) task.spec();
     }
 
     /** Risse im Block wieder entfernen – auch bei Abbruch, Unterbrechung, Pause oder Überspringen. */
@@ -48,10 +52,13 @@ final class BreakHandler implements TaskHandler {
         CompanionEntity mob = ctx.mob();
         ServerLevel sl = ctx.level();
         BlockPos p = task.pos();
+        if (spec.scoped() && (!mob.storage.stockHarvestAllowed(sl, spec) || !sl.hasChunkAt(p))) return Status.FAILED;
         // Ziel in ungeladenem Chunk: erst hingehen, den Block nicht lesen (lädt sonst den Chunk)
         if (!sl.hasChunkAt(p)) { ctx.approach(p, 2.25); return Status.RUNNING; }
         BlockState s = sl.getBlockState(p);
         if (s.isAir()) return Status.DONE;
+        if (!mob.storage.harvestAllowed(sl, p, s)) return Status.FAILED;
+        if (spec.scoped() && (!mob.hasFreeSlot() || !mob.stockRawBlock(sl, p, s))) return Status.FAILED;
         if (s.getDestroySpeed(sl, p) < 0 || (task.block() != null && !s.is(task.block()))) {
             mob.logInfo(CompanionTexts.tr("handler.break.changed", s.getBlock().getName(), p.toShortString()));
             return Status.FAILED;
@@ -60,7 +67,7 @@ final class BreakHandler implements TaskHandler {
                 || s.is(Blocks.GRAVEL) || sl.getBlockState(p.above()).is(Blocks.WATER); // Seegrund: ertaucht
         if (mob.hazardAround(sl, p, surface)) {
             // Lava daneben mit dem Wassereimer löschen (wie ein Spieler am Lavasee), dann nochmal versuchen
-            if (quenchLavaAround(mob, sl, p)) return Status.RUNNING;
+            if (!spec.scoped() && quenchLavaAround(mob, sl, p)) return Status.RUNNING;
             mob.logWarn(CompanionTexts.tr("handler.break.fluid", s.getBlock().getName(), p.toShortString()));
             return Status.FAILED;
         }
@@ -68,7 +75,7 @@ final class BreakHandler implements TaskHandler {
                 CompanionTexts.tr("handler.break.no_tool", s.getBlock().getName()));
         // Müll (Stein, Erde ... z.B. auf dem Weg) bricht er auch mit vollem Inventar ab – bleibt dann einfach liegen
         if (!mob.hasFreeSlot() && !CompanionEntity.isTrash(s.getBlock().asItem())
-                && !mob.makeRoomFor(s.getBlock().asItem(), s.is(BlockTags.ORES) || CompanionEntity.isPrecious(s.getBlock().asItem()))) {
+                && !mob.items.makeRoomFor(s.getBlock().asItem(), s.is(BlockTags.ORES) || CompanionEntity.isPrecious(s.getBlock().asItem()))) {
             mob.logWarn(CompanionTexts.tr("handler.break.full", CompanionTexts.tr(mob.getHome() == null ? "status.no" : "status.yes")));
             if (mob.hasRecipeRequest()) {
                 mob.problem(CompanionTexts.tr("processing.inventory_full", s.getBlock().getName()));
@@ -86,6 +93,19 @@ final class BreakHandler implements TaskHandler {
         }
         if (mob.tickCount % 10 == 0) mob.equipToolFor(s);
         if (mob.getEyePosition().distanceToSqr(Vec3.atCenterOf(p)) > REACH_SQR) {
+            if (spec.scoped()) {
+                if (checkedRoute == null) checkedRoute = new dev.begleiter.nav.RoundTripCheck(mob, p, 9);
+                var proof = checkedRoute.step();
+                if (proof == dev.begleiter.nav.RoundTripCheck.Status.CHECKING) return Status.RUNNING;
+                if (proof != dev.begleiter.nav.RoundTripCheck.Status.SAFE || checkedRoute.expired()) return Status.FAILED;
+                if (!checkedPathInstalled) {
+                    if (checkedRoute.returning().positions.stream().anyMatch(pos -> pos.below().equals(p))) return Status.FAILED;
+                    mob.nav.followChecked(checkedRoute.outbound(), checkedRoute.outboundContext(), checkedRoute.outboundGoal());
+                    checkedPathInstalled = true;
+                }
+                ctx.trackMove();
+                return Status.RUNNING;
+            }
             // neue Wegfindung: neben den Block stellen (nicht hineingraben)
             if (ctx.useNewPathing(p)) {
                 if (ctx.approachGoal(new Goal.Adjacent(p), p)) ctx.trackMove();
@@ -95,6 +115,7 @@ final class BreakHandler implements TaskHandler {
             return Status.RUNNING;
         }
 
+        if (spec.scoped() && (mob.blockPosition().below().equals(p) || !mob.seesBlock(sl, p))) return Status.FAILED;
         mob.getNavigation().stop();
         mob.getLookControl().setLookAt(Vec3.atCenterOf(p));
         if (progress % 5 == 0) mob.equipToolFor(s);
@@ -121,7 +142,13 @@ final class BreakHandler implements TaskHandler {
         } catch (RuntimeException ex) {
             mob.logError(CompanionTexts.tr("handler.break.error", p.toShortString(), CompanionTexts.literal(String.valueOf(ex))));
         }
-        if (removed) return Status.DONE;
+        if (removed) {
+            if (!spec.scoped()) return Status.DONE;
+            mob.work.stockReturning();
+            mob.replaceCurrent(java.util.List.of(new Task(new TaskSpec.MoveTo(mob.getHome(), 9, true))));
+            return Status.REPLACED;
+        }
+        if (spec.scoped()) return Status.FAILED;
         mob.problem(CompanionTexts.tr("handler.break.unconfirmed", p.toShortString()));
         if (mob.goal != null) {
             ctx.abortAutonomousPlan(DecisionOutcome.Reason.PLAN_FAILED);
@@ -152,8 +179,8 @@ final class BreakHandler implements TaskHandler {
             var fs = sl.getFluidState(q);
             if (!fs.is(FluidTags.LAVA)) continue;
             mob.getLookControl().setLookAt(Vec3.atCenterOf(q));
-            if (fs.isSource()) mob.pourWater(sl, q);
-            else sl.setBlock(q, Blocks.COBBLESTONE.defaultBlockState(), 3);
+            if (fs.isSource()) mob.portals.pourWater(sl, q);
+            else mob.worldSet(sl, q, Blocks.COBBLESTONE.defaultBlockState(), 3);
             any = true;
         }
         return any;

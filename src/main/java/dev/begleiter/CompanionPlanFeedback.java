@@ -43,17 +43,14 @@ public final class CompanionPlanFeedback {
         return switch (need) {
             case SUPPLY -> null; // Resource selection happens in actSupply; no inventory changes there.
             case SURVIVAL -> survival(e);
-            case HUNGER -> e.hunger <= 12 && e.foodCount() < 4
+            case HUNGER -> e.food.level() <= 12 && e.foodCount() < 4
                     ? deficit(() -> Math.max(0, 4 - e.foodCount()))
                     : CompanionCraft.rawFood(e) >= 3 && CompanionCraft.canSmelt(e)
                         ? deficit(() -> CompanionCraft.rawFood(e))
                         : deficit(() -> Math.max(0, 4 - e.foodCount()));
             case ORDER -> order(e);
             case GEAR -> gear(e);
-            case BASE -> !e.isHouseBuilt()
-                    ? milestone(() -> e.isHouseBuilt(), () -> e.build == null ? 0 : e.build.index)
-                    : e.getHome() == null ? milestone(() -> e.getHome() != null, () -> 0)
-                    : milestone(() -> !e.houseNeedsDoor(), () -> 0);
+            case BASE -> base(e);
             case PROGRESS -> progress(e);
             case CARE -> care(e);
         };
@@ -84,12 +81,25 @@ public final class CompanionPlanFeedback {
                 : deficit(() -> e.isInsideHouse() ? 0 : 1);
     }
 
+    private static Objective base(CompanionEntity e) {
+        if (!e.isHouseBuilt()) return milestone(() -> e.isHouseBuilt(), () -> e.build == null ? 0 : e.build.index);
+        if (e.getHome() == null) return milestone(() -> e.getHome() != null, () -> 0);
+        if (!e.doorClosed && e.houseNeedsDoor()) return milestone(() -> !e.houseNeedsDoor(), () -> 0);
+        if (e.level() instanceof net.minecraft.server.level.ServerLevel sl) {
+            var care = e.initiative.base;
+            if (care.lightingWanted(sl) > 0) return deficit(() -> care.darkSpots(sl, true).size());
+            if (care.wantsField(sl))
+                return milestone(() -> care.hasField(sl, true), () -> e.build == null ? 0 : e.build.index);
+        }
+        return milestone(() -> !e.houseNeedsDoor(), () -> 0);
+    }
+
     private static Objective order(CompanionEntity e) {
-        if (e.hasScaffold()) return deficit(() -> e.scaffold.size());
-        if (e.looseItemsNearby()) {
+        if (e.hasScaffold()) return deficit(() -> e.scaffolding.size());
+        if (e.pickup.looseItemsNearby()) {
             // Ursprüngliche Items behalten: ein unerreichbarer Drop, der ausgelassen wird, zählt nicht als eingesammelt.
             var drops = e.level().getEntitiesOfClass(ItemEntity.class, e.getBoundingBox().inflate(12),
-                    item -> item.isAlive() && e.collectible(item));
+                    item -> item.isAlive() && e.pickup.collectible(item));
             return deficit(() -> drops.stream().filter(ItemEntity::isAlive)
                     .mapToInt(item -> item.getItem().getCount()).sum());
         }
@@ -122,11 +132,13 @@ public final class CompanionPlanFeedback {
         if (e.getPortalPos() == null)
             return milestone(() -> e.getPortalPos() != null, () -> CompanionCraft.count(e, "obsidian"));
         if (CompanionBrain.needsBlaze(e))
-            return deficit(() -> Math.max(0, CompanionBrain.RODS - CompanionBrain.blazeRods(e)));
+            return deficit(() -> CompanionBrain.rawBlazeTarget(e) - CompanionCraft.count(e, "blaze_rod"));
         if (CompanionBrain.wantsPearlHunt(e))
             return deficit(() -> Math.max(0, CompanionBrain.PEARLS - CompanionBrain.pearlsAndEyes(e)));
         if (e.endPortalPos == null)
             return milestone(() -> e.endPortalPos != null, () -> CompanionCraft.count(e, "ender_eye"));
+        if (CompanionBrain.dragonDefeated(e))
+            return deficit(() -> CompanionJobs.nextGearPiece(e, 4, 0) == null ? 0 : 1);
         return deficit(() -> (CompanionCraft.owns(e, "bow") ? 0 : 1)
                 + Math.max(0, CompanionBrain.ARROWS - CompanionCraft.count(e, "arrow")));
     }
@@ -258,5 +270,45 @@ public final class CompanionPlanFeedback {
         e.activeSupplyResource = null;
         e.activeSupplyApproach = null;
         e.consoleDebug("Plan outcome: " + last);
+    }
+
+    /** Fehlschläge nur aus eigenen Plänen merken; Befehle des Besitzers bringen ihm nie ein schlechtes Ergebnis bei. */
+    void reportAutonomousFailure(CompanionEntity e, DecisionOutcome.Reason reason, CompanionEntity.Task failedTask) {
+        var goal = e.goal;
+        if (goal == null) return;
+        if (failed(e, reason, failedTask)) return;
+        var source = CompanionSources.failureSource(e, goal, reason, failedTask);
+        if (source != null) {
+            e.experiences.sources.failed(source, reason, e.tickCount);
+            return;
+        }
+        String target = goal == Need.SUPPLY ? e.activeSupplyResource
+                : failedTask == null ? null : failureTarget(failedTask.spec());
+        e.experiences.record(new DecisionOutcome(goal, reason, target, e.tickCount));
+        if (goal == Need.SUPPLY && target != null && e.activeSupplyApproach != null) {
+            // Ein mehrstufiger Plan baut vielleicht erst ab und geht dann zur Kiste, oder craftet erst Werkzeug:
+            // bestraft wird der Schritt, der wirklich scheiterte
+            String actualMethod = AdaptiveAcquisition.failedApproach(failedTask, e.activeSupplyApproach);
+            e.experiences.recordTargetOnly(new DecisionOutcome(goal, reason, target + "_" + actualMethod, e.tickCount));
+        }
+        e.consoleDebug("Intelligence: " + goal + " failed (" + reason
+                + (target == null ? "" : ", " + target) + ")");
+    }
+
+    /** Worauf sich ein Fehlschlag bezieht (Ressource, Item, Tierart) – Schlüssel der Erfahrung; null = nichts Benennbares. */
+    private static String failureTarget(TaskSpec spec) {
+        return switch (spec) {
+            case TaskSpec.ResourceGoal g -> g.resource();
+            case TaskSpec.Craft c -> c.item();
+            case TaskSpec.Smelt s -> s.item();
+            case TaskSpec.Station s -> s.item();
+            case TaskSpec.Take tk -> tk.item();
+            case TaskSpec.Give g -> g.what();
+            case TaskSpec.Trade tr -> tr.item();
+            case TaskSpec.Fight f -> f.mob();
+            case TaskSpec.Breed b -> b.species();
+            case TaskSpec.Fetch f -> f.animal();
+            default -> null;
+        };
     }
 }

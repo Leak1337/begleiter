@@ -268,13 +268,13 @@ public class NavBasicsTests {
         CompanionEntity c = companion(h);
         c.giveToInventory(new ItemStack(Items.COBBLESTONE, 20));
         c.giveToInventory(new ItemStack(Items.WATER_BUCKET));
-        c.hunger = 5;
+        c.food.set(5);
         NavContext ctx = new NavContext(c);
         h.assertValueEqual(ctx.throwaway, 20, "Müllblöcke");
         h.assertTrue(ctx.waterBucket, "Wassereimer nicht erkannt");
         h.assertTrue(!ctx.canSprint, "Sprint trotz Hunger");
         h.assertTrue(!ctx.nether, "Oberwelt als Nether");
-        c.hunger = 20;
+        c.food.set(20);
         BlockPos home = h.absolutePos(new BlockPos(4, 1, 4));
         c.setHome(home);
         ctx = new NavContext(c);

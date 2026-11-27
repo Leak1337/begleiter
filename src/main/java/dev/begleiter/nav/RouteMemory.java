@@ -35,6 +35,14 @@ public final class RouteMemory {
 
     public int count(BlockPos p) { return steps.get(p.asLong()); }
 
+    public double sourcePreference(net.minecraft.server.level.ServerLevel level, BlockPos source) {
+        if (seed != worldKey(level)) return 1;
+        for (var direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+            if (count(source.relative(direction)) >= TRAMPLED) return FACTOR;
+        }
+        return 1;
+    }
+
     /** Er stand gerade auf p (fertige Bewegung). Andere Welt: altes Gedächtnis gilt nicht mehr. */
     public void noteStep(BlockPos p, long worldSeed) {
         if (worldSeed != seed) {

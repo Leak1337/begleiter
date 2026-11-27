@@ -56,12 +56,12 @@ public interface TaskContext {
 
     /** Spieler-Auftrag: Antwort in den Chat; eigener Plan: nur ins Log (sonst redet er bei jeder Runde). */
     default void say(String msg) {
-        if (mob().goal == null) mob().tell(msg);
+        if (mob().goal == null && !mob().work.active()) mob().tell(msg);
         mob().logInfo(msg);
     }
 
     default void say(net.minecraft.network.chat.Component msg) {
-        if (mob().goal == null) mob().tell(msg);
+        if (mob().goal == null && !mob().work.active()) mob().tell(msg);
         mob().logInfo(msg);
     }
 

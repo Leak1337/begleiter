@@ -70,9 +70,9 @@ public class LogTextGameTests {
         h.assertTrue(c.getLog(0, 1, false).getFirst().kind() == EventKind.CRAFT, "Craft event kind missing");
         var craftName = (TranslatableContents) c.getLog(0, 1, false).getFirst().textComponent().getContents();
         h.assertTrue(craftName.getArgs()[1] instanceof Component item && item.getContents() instanceof TranslatableContents, "Native crafted item flattened");
-        c.giveToInventory(new ItemStack(Items.BREAD, 2)); c.hunger = 8; c.tickCount = 20;
+        c.giveToInventory(new ItemStack(Items.BREAD, 2)); c.food.set(8); c.tickCount = 20;
         c.customServerAiStep(h.getLevel());
-        h.assertTrue(c.hunger == 13 && CompanionCraft.count(c, "bread") == 1, "Eating behavior changed");
+        h.assertTrue(c.food.level() == 13 && CompanionCraft.count(c, "bread") == 1, "Eating behavior changed");
         var full = debug(h, c, p, BotDebug.LEVEL_FULL).detail();
         var hud = debug(h, c, p, BotDebug.LEVEL_HUD).detail();
         h.assertTrue(full.logLines().getFirst().kind() == EventKind.FOOD && hud.logLines().size() == 2,
@@ -152,7 +152,7 @@ public class LogTextGameTests {
         c.nav.goTo(new dev.begleiter.nav.Goal.Block(at.east(3)));
         c.nav.recoveryEvent(CompanionTexts.tr("nav.event.failed", CompanionTexts.tr("route.known_danger")));
         long generation = c.nav.generation(); var executor = c.nav.executor(); boolean searching = c.nav.searching();
-        var tasks = c.peekTasks(10); var position = c.position(); var lines = c.debugComponents();
+        var tasks = c.peekTasks(10); var position = c.position(); var lines = c.watchdog.debugComponents();
         for (var line : lines) {
             if (!(line.getContents() instanceof TranslatableContents tr)) continue;
             switch (tr.getKey()) {

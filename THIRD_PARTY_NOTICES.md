@@ -1,7 +1,7 @@
 # Licenses and third-party code
 
-Begleiter's independently authored code remains available under the MIT license in `LICENSE`.
-The third-party components below have their own license; the MIT license does not replace it.
+Begleiter's independently authored code is available under the Apache License 2.0 in `LICENSE`.
+The third-party components below have their own license; see the component notices below for terms.
 Both licenses are listed in `fabric.mod.json` to describe the contents, not as alternative
 licenses for the Baritone component.
 
@@ -34,7 +34,7 @@ removed `IOpenSet`, substituted the independently authored Begleiter `Node` data
 and its `f`/`heapIdx` fields, added membership reporting and rejected capacities
 smaller than two. The heap algorithms and cached-cost array are adapted from
 Baritone. The library operates on application-owned nodes supplied to its methods;
-the other navigation classes remain independently licensed under MIT.
+the other navigation classes are independently licensed under Apache-2.0.
 
 The comparison-only files `tools/benchmarks/dev/begleiter/nav/BaritoneNodeHeap.java`
 and `BaritoneCellMap.java` are also LGPL-3.0-or-later adaptations from the same
@@ -43,7 +43,7 @@ and the `getNodeAtPosition` method in `src/main/java/baritone/pathing/calc/Abstr
 Changes: renamed classes/package, substituted Begleiter's `Node`/field names,
 removed unrelated search code and exposed only the operations needed by the comparison.
 They are not compiled into the mod. Their source is included for reproducibility.
-The independent comparison driver and Gradle script remain MIT.
+The independent comparison driver and Gradle script are Apache-2.0.
 
 ## Baritone position lookup cache
 
@@ -65,7 +65,7 @@ The application uses it only during navigation search, not for live movement rea
 
 The mining-cost memoization in `NavContext` follows Baritone's search-only caching
 idea but uses independently implemented, bounded fastutil maps and explicitly
-invalidates on world-snapshot and permission-policy changes. It remains MIT.
+invalidates on world-snapshot and permission-policy changes. It is Apache-2.0.
 
 ## Bundled building designs
 
@@ -108,4 +108,4 @@ library can also be compiled on its own using `javac -d classes
 src/main/java/dev/begleiter/thirdparty/baritone/BetterWorldBorder.java`.
 Modification of the library and reverse engineering to debug those modifications
 are permitted as required by LGPL section 4. This permission adds no restriction
-to the MIT-licensed application code.
+to the Apache-2.0-licensed application code.

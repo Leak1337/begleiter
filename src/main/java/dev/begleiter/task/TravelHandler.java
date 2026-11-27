@@ -32,11 +32,19 @@ final class TravelHandler implements TaskHandler {
         double dx = target.getX() - mob.getX(), dz = target.getZ() - mob.getZ();
         double dist = Math.sqrt(dx * dx + dz * dz);
         if (dist <= 20) return Status.DONE;
-        if (!prepared || mob.tickCount - lastPreparationTick >= 100) {
+        if (!mob.journey.isReturningTo(target) && (!prepared || mob.tickCount - lastPreparationTick >= 100)) {
             prepared = true;
             lastPreparationTick = mob.tickCount;
             if (!mob.creativeHelper() && target.distSqr(mob.blockPosition()) > 64 * 64) mob.eatBeforeTrip();
             var readiness = dev.begleiter.CompanionTripPreparation.check(mob, target);
+            if (readiness.reason() == dev.begleiter.ai.DecisionOutcome.Reason.MISSING_INPUT
+                    && dev.begleiter.CompanionTripPreparation.resupplyFood(mob, ctx.level(), target)) {
+                readiness = dev.begleiter.CompanionTripPreparation.check(mob, target);
+            }
+            if (readiness.reason() == dev.begleiter.ai.DecisionOutcome.Reason.MISSING_TOOL
+                    && dev.begleiter.CompanionTripPreparation.resupplyTools(mob, ctx.level())) {
+                readiness = dev.begleiter.CompanionTripPreparation.check(mob, target);
+            }
             if (!readiness.ready()) {
                 // At most two preparation rounds at a nearby known home; recipe deliveries stay reserved.
                 if (readiness.reason() == dev.begleiter.ai.DecisionOutcome.Reason.INVENTORY_FULL
@@ -56,6 +64,7 @@ final class TravelHandler implements TaskHandler {
                 var message = readiness.message();
                 mob.setUiFeedback(message);
                 mob.logWarn(message);
+                if (mob.journey.handleTravelBlock(target, readiness)) return Status.REPLACED;
                 mob.pauseWork(message);
                 prepared = false; // Explicit resume must recheck even if no world tick elapsed.
                 return Status.RUNNING;

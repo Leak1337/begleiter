@@ -24,7 +24,7 @@ public class PlannerGameTests {
         var p = explorationColumn(h);
         h.setBlock(5, 12, 5, Blocks.JUNGLE_LOG);
         h.setBlock(5, 13, 5, Blocks.JUNGLE_LEAVES);
-        h.assertValueEqual(c.explorationSurfaceY(h.getLevel(), p.getX(), p.getZ()), p.getY(),
+        h.assertValueEqual(c.explore.explorationSurfaceY(h.getLevel(), p.getX(), p.getZ()), p.getY(),
                 "Nahrungssuche darf keinen Stamm in der Baumkrone als Boden wählen");
         h.succeed();
     }
@@ -34,7 +34,7 @@ public class PlannerGameTests {
         var c = companion(h);
         var p = explorationColumn(h);
         h.setBlock(5, 10, 5, Blocks.BROWN_MUSHROOM_BLOCK);
-        h.assertValueEqual(c.explorationSurfaceY(h.getLevel(), p.getX(), p.getZ()), p.getY(),
+        h.assertValueEqual(c.explore.explorationSurfaceY(h.getLevel(), p.getX(), p.getZ()), p.getY(),
                 "Nahrungssuche darf keinen Riesenpilzhut ansteuern");
         h.succeed();
     }
@@ -44,7 +44,7 @@ public class PlannerGameTests {
         var c = companion(h);
         var p = explorationColumn(h);
         for (int y = 1; y <= 16; y++) h.setBlock(5, y, 5, Blocks.BAMBOO);
-        h.assertValueEqual(c.explorationSurfaceY(h.getLevel(), p.getX(), p.getZ()), Integer.MIN_VALUE,
+        h.assertValueEqual(c.explore.explorationSurfaceY(h.getLevel(), p.getX(), p.getZ()), Integer.MIN_VALUE,
                 "Bambusspitzen und belegter Boden sind kein Erkundungsziel");
         h.succeed();
     }
@@ -55,7 +55,7 @@ public class PlannerGameTests {
         var p = explorationColumn(h);
         h.setBlock(5, 12, 5, Blocks.STONE);
         h.setBlock(5, 13, 5, Blocks.WATER);
-        h.assertValueEqual(c.explorationSurfaceY(h.getLevel(), p.getX(), p.getZ()), Integer.MIN_VALUE,
+        h.assertValueEqual(c.explore.explorationSurfaceY(h.getLevel(), p.getX(), p.getZ()), Integer.MIN_VALUE,
                 "Unter einem See liegende trockene Hohlräume sind keine Oberflächenziele");
         h.succeed();
     }

@@ -79,6 +79,9 @@ public final class LexiconEn implements Lexicon {
 
     @Override public List<ChatIntent> intents(Sentence s) {
         List<ChatIntent> out = new ArrayList<>();
+        // Talkativeness: "be quieter", "talk less" / "talk more", "be chattier"
+        if (s.has("quieter", "talk less", "speak less", "be quiet")) out.add(ChatIntent.TALK_LESS);
+        if (s.has("talk more", "speak more", "chattier", "tell me more")) out.add(ChatIntent.TALK_MORE);
         // Waypoints: "remember this as mine", "forget waypoint mine", "which waypoints do you know", "go to mine"
         if (s.anyStart("remember", "mark", "save", "note") && s.any("as")) out.add(ChatIntent.WAYPOINT_SAVE);
         if (s.anyStart("forget", "delet", "remov", "eras")) out.add(ChatIntent.WAYPOINT_FORGET);
@@ -113,6 +116,9 @@ public final class LexiconEn implements Lexicon {
         if ("any".equals(breedMob)) breedMob = null;
         if (s.anyStart("breed", "multiply") || (care && (word(s, "herd", "animal") || breedMob != null)))
             out.add(ChatIntent.BREED);
+        if (s.any("fishing") || s.phrase("go fish", "fish for") || (s.anyStart("catch") && word(s, "fish", "cod", "salmon"))
+                || (!s.tokens().isEmpty() && s.tokens().getFirst().equals("fish")))
+            out.add(ChatIntent.FISH);
         if (s.anyStart("repair", "fix", "mend") || (s.has("maintain") && word(s, "tool", "armor", "armour", "gear")))
             out.add(ChatIntent.REPAIR);
         if (s.anyStart("trade", "buy", "sell", "exchange", "swap", "barter")) out.add(ChatIntent.TRADE);

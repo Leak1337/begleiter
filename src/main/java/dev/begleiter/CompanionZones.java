@@ -74,6 +74,10 @@ public final class CompanionZones {
 
     /** Einschränkung gilt während Daueraufgaben; einzelne Spieleraufträge bleiben unabhängig. */
     public static Zone work(CompanionEntity c, Kind kind) {
+        if (c.work.active()) {
+            Zone bound = c.work.zone();
+            return bound != null && bound.kind == kind ? bound : null;
+        }
         if (c.duty() == null || !(c.level() instanceof ServerLevel sl)) return null;
         if (c.duty() != CompanionDuties.Duty.BASE && kind != kindFor(c.duty())) return null;
         Zone z = c.zones.get(kind, sl);
@@ -87,6 +91,12 @@ public final class CompanionZones {
         return z == null ? List.of() : List.of(z);
     }
     public static boolean collectionAllowed(CompanionEntity c, BlockPos p) {
+        if (c.work.active()) {
+            Zone zone = c.work.zone();
+            return zone != null && (zone.kind == Kind.FIELDS || zone.kind == Kind.ANIMALS || zone.kind == Kind.STORAGE)
+                    && zone.contains(p) && c.level() instanceof ServerLevel world && c.work.runnable(world);
+        }
+        if (c.work.enabled() && !c.hasTasks()) return false;
         var zones = collectionZones(c);
         return zones.isEmpty() || zones.stream().anyMatch(z -> z.contains(p));
     }

@@ -195,6 +195,9 @@ public class CombatGameTests {
             var inside = CompanionNeeds.evaluate(c).getFirst();
             h.assertTrue(inside.need() == CompanionNeeds.Need.SURVIVAL, "Verlässt den Unterschlupf zu früh: " + inside);
             c.setHealth(c.getMaxHealth());
+            skeleton.discard(); // Schütze weg: der Unterschlupf bleibt sonst zu, solange ein Monster davor steht
+            h.setTime(1000); // bei Tag (nachts an der Oberfläche bleibt er bis zum Morgen drin)
+            h.getLevel().updateSkyBrightness();
             sealed[0] = true;
         });
         h.succeedWhen(() -> {

@@ -2,6 +2,7 @@ package dev.begleiter;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -31,9 +32,22 @@ public class CompanionCoreItem extends Item {
         companion.setOwner(player.getUUID());
         companion.setCustomName(Component.literal(CompanionEntity.DEFAULT_NAME));
         CustomData memory = ctx.getItemInHand().get(DataComponents.CUSTOM_DATA);
-        boolean revived = memory != null && !memory.isEmpty();
-        if (revived) companion.loadMemory(memory.copyTag());
-        level.addFreshEntity(companion);
+        CompoundTag data = memory == null ? new CompoundTag() : memory.copyTag();
+        java.util.UUID soul = data.read("Soul", net.minecraft.core.UUIDUtil.CODEC).orElse(null);
+        CompoundTag full = data;
+        if (soul != null) {
+            // Neuer Kern: Gedächtnis liegt im Weltspeicher. Fehlt es (andere Welt, schon wiederbelebt), bleibt der Kern.
+            full = CompanionMemoryStore.get(level.getServer()).peek(soul);
+            if (full == null) {
+                player.sendSystemMessage(CompanionTexts.prefixed(CompanionTexts.tr("core.memory_missing")));
+                return InteractionResult.FAIL;
+            }
+        }
+        boolean revived = !full.isEmpty();
+        if (revived) companion.loadMemory(full); // alter Kern: Gedächtnis steckt noch im Kern selbst
+        if (soul != null) companion.setSoulId(soul);
+        if (!level.addFreshEntity(companion)) return InteractionResult.FAIL; // nichts verbraucht
+        if (soul != null) CompanionMemoryStore.get(level.getServer()).consume(soul); // erst nach bestätigter Rückkehr
         companion.tell(CompanionTexts.tr(revived ? "reply.revived" : "reply.hello"));
         ctx.getItemInHand().consume(1, player);
         return InteractionResult.SUCCESS_SERVER;

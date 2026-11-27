@@ -41,6 +41,7 @@ final class BuildHandler implements TaskHandler {
     private static final int GHOST_PER_TICK = 64;
 
     private int progress;
+    private int stageAgain;
     /** Vor den Nutzpflanzen die fertig eingefasste Bewässerung anlaufen lassen. */
     private int plantsReadyAt = -1;
     /** Für welche Stelle der Standplatz gilt. */
@@ -59,6 +60,7 @@ final class BuildHandler implements TaskHandler {
         // Geist: so viele Schritte pro Tick, wie etwas passiert (setzen/wegräumen), höchstens GHOST_PER_TICK
         Status st = Status.RUNNING;
         for (int i = 0; i < GHOST_PER_TICK; i++) {
+            if (mob.work.active() && mob.work.remaining() <= 0) break;
             int before = job.index;
             BlockPos at = before < job.order.size() ? job.order.get(before).pos() : null;
             BlockState was = at != null && ctx.level().hasChunkAt(at) ? ctx.level().getBlockState(at) : null;
@@ -81,6 +83,10 @@ final class BuildHandler implements TaskHandler {
             return Status.RUNNING;
         }
         boolean creative = mob.creativeHelper();
+        if (!creative && mob.tickCount >= stageAgain) {
+            stageAgain = mob.tickCount + 80;
+            CompanionBuilder.stageBuildMaterials(mob, sl, job);
+        }
         // Baustelle in ungeladenem Chunk: nichts lesen (das würde ihn laden), nur hinlaufen
         if (job.index < job.order.size() && !sl.hasChunkAt(job.order.get(job.index).pos())) {
             ctx.approach(job.order.get(job.index).pos(), REACH_SQR);
@@ -99,12 +105,30 @@ final class BuildHandler implements TaskHandler {
         int pct = job.index * 100 / job.total();
         if (pct >= job.lastReported + 25) {
             job.lastReported = pct - pct % 25;
-            mob.tell(CompanionTexts.tr("handler.build.progress", CompanionTexts.buildName(job.name), job.index, job.total(), pct));
+            mob.talk.tellProgress(CompanionTexts.tr("handler.build.progress", CompanionTexts.buildName(job.name), job.index, job.total(), pct));
         }
 
         CompanionBuilder.Placement p = job.order.get(job.index);
+        Item item = CompanionBuilder.itemFor(p.state());
+        int cost = CompanionBuilder.itemCount(p.state());
+        if (!creative && item != null && !mob.work.permitsInput(item, cost)) {
+            mob.work.noBuildMaterial(item, cost, true);
+            return Status.REPLACED;
+        }
         BlockState cur = sl.getBlockState(p.pos());
 
+        // Acker wie mit der Hacke: Gras/Erde an Ort und Stelle umgraben statt abbauen (beobachtet: die vier Felder neben dem
+        // Wasser in der Mitte ließen sich wegen "Wasser daneben" nicht abbauen und blieben Gras)
+        if (p.state().is(net.minecraft.world.level.block.Blocks.FARMLAND) && sl.getBlockState(p.pos().above()).isAir()
+                && (cur.is(net.minecraft.world.level.block.Blocks.GRASS_BLOCK) || cur.is(net.minecraft.world.level.block.Blocks.DIRT)
+                || cur.is(net.minecraft.world.level.block.Blocks.DIRT_PATH))) {
+            if (!approachForBuild(ctx, sl, job, p.pos())) return Status.RUNNING;
+            sl.setBlock(p.pos(), net.minecraft.world.level.block.Blocks.FARMLAND.defaultBlockState(), 3);
+            sl.playSound(null, p.pos(), net.minecraft.sounds.SoundEvents.HOE_TILL.value(), net.minecraft.sounds.SoundSource.BLOCKS, 1f, 1f);
+            mob.swingArm();
+            job.index++;
+            return Status.RUNNING;
+        }
         // Im Weg: erst abbauen (Kreativ: sofort, sobald in Reichweite)
         if (!cur.isAir() && !cur.canBeReplaced() && !CompanionBuilder.matches(cur, p.state()) || (p.state().isAir() && !cur.isAir())) {
             if (cur.getDestroySpeed(sl, p.pos()) < 0) {
@@ -118,12 +142,20 @@ final class BuildHandler implements TaskHandler {
                 return Status.RUNNING;
             }
             if (!creative) {
+                // Lässt sich die Stelle auch nach mehreren Anläufen nicht freiräumen (z.B. Lava daneben, kein Eimer),
+                // überspringen statt endlos neu anzusetzen; der Rest des Bauwerks wird trotzdem fertig.
+                if (job.breakIndex != job.index) { job.breakIndex = job.index; job.breakTries = 0; }
+                if (++job.breakTries > 4) {
+                    mob.logWarn(CompanionTexts.tr("handler.build.failed", p.pos().toShortString(), p.state().getBlock().getName()));
+                    job.index++;
+                    return Status.RUNNING;
+                }
                 // Nur genau den geprüften Block abbauen; steht dort beim Abbau etwas anderes, bricht er ab
                 mob.pushFront(Task.breakAt(p.pos(), cur.getBlock()));
                 return Status.REPLACED;
             }
             if (!approachForBuild(ctx, sl, job, p.pos())) return Status.RUNNING;
-            sl.destroyBlock(p.pos(), false, mob);
+            mob.worldBreak(sl, p.pos(), false);
             mob.swingArm();
             return Status.RUNNING;
         }
@@ -133,9 +165,11 @@ final class BuildHandler implements TaskHandler {
         }
 
         // Material (Doppelstufe kostet 2: dafür reicht ein einzelnes Item nicht)
-        Item item = CompanionBuilder.itemFor(p.state());
-        int cost = CompanionBuilder.itemCount(p.state());
         if (!creative && item != null && CompanionCraft.count(mob, BuiltInRegistries.ITEM.getKey(item).toString()) < cost) {
+            if (mob.work.is(dev.begleiter.CompanionWork.Kind.BUILD)) {
+                if (!mob.work.planBuildMaterial(sl, item, cost - mob.getInventory().countItem(item))) mob.work.noBuildMaterial(item, cost, false);
+                return Status.REPLACED;
+            }
             int total = Math.min(64, CompanionBuilder.remaining(sl, job).getOrDefault(item, cost));
             int tries = job.attempts.merge(item, 1, Integer::sum);
             List<Task> get = tries <= 3 ? CompanionBuilder.acquire(mob, sl, item, total) : null;
@@ -222,10 +256,13 @@ final class BuildHandler implements TaskHandler {
                     need -= n;
                 }
             }
+            mob.work.spent(item, cost);
         }
         job.placed.add(p.pos());
+        CompanionBuilder.notePlaced(job, p); // Restmaterial ohne neue Zählung aktuell halten
         if (item != null) job.attempts.remove(item); // erfolgreicher Einbau beendet eine erfolglose Beschaffungsserie
         job.index++;
+        mob.work.progress(1);
         return Status.RUNNING;
     }
 
@@ -436,6 +473,7 @@ final class BuildHandler implements TaskHandler {
             if (creative && result.missing() > 0) mob.logWarn(CompanionTexts.tr("handler.build.entities.failed", result.missing()));
         }
         mob.build = null;
+        mob.work.buildFinished();
         return Status.DONE;
     }
 }
